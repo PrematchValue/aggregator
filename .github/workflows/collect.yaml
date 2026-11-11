@@ -60,7 +60,7 @@ jobs:
         # Look back 50 recent Telegram archive pages rather than the entire history.
         # Skip CAPTCHA-only airports to reduce futile registrations.
         # Keep --skip for now: runner-side proxy checks can falsely reject CN-usable nodes.
-        run: python -u subscribe/collect.py --all --overwrite --skip --pages 50 --skip-captcha
+        run: python -u subscribe/collect.py --all --overwrite --skip --pages 50 --skip-captcha -t clash v2ray singbox surge
 
       - name: Timestamp
         run: date
