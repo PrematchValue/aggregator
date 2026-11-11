@@ -1,0 +1,182 @@
+# Manual only. Never writes main or uses Gist secrets.
+name: Sync upstream safely
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-sync-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      changed: ${{ steps.prepare.outputs.changed }}
+      base: ${{ steps.prepare.outputs.base }}
+      upstream: ${{ steps.prepare.outputs.upstream }}
+      tree: ${{ steps.merge.outputs.tree }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pin revisions
+        id: prepare
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=$(git rev-parse HEAD)
+          git fetch --no-tags https://github.com/wzdnzd/aggregator.git refs/heads/main
+          upstream=$(git rev-parse FETCH_HEAD)
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "upstream=$upstream" >> "$GITHUB_OUTPUT"
+          if git merge-base --is-ancestor "$upstream" "$base"; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo 'Upstream is already included. No changes needed.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Merge while preserving customizations
+        if: steps.prepare.outputs.changed == 'true'
+        id: merge
+        env:
+          BASE: ${{ steps.prepare.outputs.base }}
+          UPSTREAM: ${{ steps.prepare.outputs.upstream }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags https://github.com/wzdnzd/aggregator.git "$UPSTREAM"
+          git cat-file -e "$UPSTREAM^{commit}"
+          rc=0
+          git merge --no-commit --no-ff "$UPSTREAM" || rc=$?
+          if [ "$rc" -gt 1 ]; then
+            echo '::error::Upstream merge failed.'
+            exit 1
+          fi
+          if [ "$rc" -eq 1 ] && [ -z "$(git ls-files -u)" ]; then
+            echo '::error::Merge failed without resolvable file conflicts.'
+            exit 1
+          fi
+          # Restore our complete customized files, including all workflow definitions.
+          git restore --source="$BASE" --staged --worktree -- \
+            .github subscribe/collect.py subscribe/discovery.py \
+            subscribe/collect_safety.py tests docs/collect-safety.md
+          if [ -n "$(git ls-files -u)" ]; then
+            git diff --name-only --diff-filter=U
+            echo '::error::Unprotected files conflict. Main was not changed; manual review is required.'
+            exit 1
+          fi
+          git diff --cached --exit-code "$BASE" -- \
+            .github subscribe/collect.py subscribe/discovery.py \
+            subscribe/collect_safety.py tests docs/collect-safety.md
+          echo "tree=$(git write-tree)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-python@v5
+        if: steps.prepare.outputs.changed == 'true'
+        with:
+          python-version: '3.12'
+      - name: Validate merged code without write credentials or Gist secrets
+        if: steps.prepare.outputs.changed == 'true'
+        run: |
+          python -m pip install -r requirements.txt
+          python -m compileall -q subscribe tests
+          python -m unittest discover -s tests -v
+          python subscribe/collect.py --help
+
+  propose:
+    needs: validate
+    if: needs.validate.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.base }}
+          fetch-depth: 0
+          persist-credentials: false
+      # Rebuild the tested tree on a fresh runner. Do not execute merged code here.
+      - name: Rebuild and verify exact tested tree
+        env:
+          BASE: ${{ needs.validate.outputs.base }}
+          UPSTREAM: ${{ needs.validate.outputs.upstream }}
+          EXPECTED_TREE: ${{ needs.validate.outputs.tree }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags https://github.com/wzdnzd/aggregator.git "$UPSTREAM"
+          git cat-file -e "$UPSTREAM^{commit}"
+          rc=0
+          git merge --no-commit --no-ff "$UPSTREAM" || rc=$?
+          if [ "$rc" -gt 1 ]; then
+            echo '::error::Upstream merge failed.'
+            exit 1
+          fi
+          if [ "$rc" -eq 1 ] && [ -z "$(git ls-files -u)" ]; then
+            echo '::error::Merge failed without resolvable file conflicts.'
+            exit 1
+          fi
+          # Restore our complete customized files, including all workflow definitions.
+          git restore --source="$BASE" --staged --worktree -- \
+            .github subscribe/collect.py subscribe/discovery.py \
+            subscribe/collect_safety.py tests docs/collect-safety.md
+          if [ -n "$(git ls-files -u)" ]; then
+            git diff --name-only --diff-filter=U
+            echo '::error::Unprotected files conflict. Main was not changed; manual review is required.'
+            exit 1
+          fi
+          git diff --cached --exit-code "$BASE" -- \
+            .github subscribe/collect.py subscribe/discovery.py \
+            subscribe/collect_safety.py tests docs/collect-safety.md
+          test "$(git write-tree)" = "$EXPECTED_TREE"
+          git commit -m "Merge upstream ${UPSTREAM:0:12}; preserve local customizations"
+      - name: Publish review branch and open pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BASE: ${{ needs.validate.outputs.base }}
+          UPSTREAM: ${{ needs.validate.outputs.upstream }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current=$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq '.object.sha')
+          if [ "$current" != "$BASE" ]; then
+            echo '::error::Main changed during validation. Run this workflow again.'
+            exit 1
+          fi
+          branch="sync/upstream-${UPSTREAM:0:12}-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          gh auth setup-git
+          git push origin "HEAD:refs/heads/$branch"
+          body="$RUNNER_TEMP/sync-pr.md"
+          cat > "$body" <<EOF
+          Merge upstream wzdnzd/aggregator at $UPSTREAM into main at $BASE.
+
+          Preserved all local workflows, Collect/Refresh implementation, safety checks,
+          tests, and docs/collect-safety.md. Upstream changes to those files are
+          intentionally excluded and may need to be ported separately.
+
+          Validation: dependency installation, compileall, regression tests and CLI help
+          passed on the exact proposed tree. No Gist secrets were used.
+          Review this PR before merging; this workflow never merges automatically.
+
+          Run: https://github.com/$GH_REPO/actions/runs/$GITHUB_RUN_ID
+          EOF
+          if url=$(gh pr create --base main --head "$branch" \
+              --title "Sync upstream ${UPSTREAM:0:12} (preserve customizations)" \
+              --body-file "$body"); then
+            echo "Review and merge when ready: $url" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Branch uploaded, but PR creation failed. Enable Actions PR creation, or open: https://github.com/$GH_REPO/compare/main...$branch?expand=1" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
