@@ -1,35 +1,29 @@
 name: Collect
 on:
-  # executed once a week on Sundays at 00:00
+  # Every Monday at 08:00 Asia/Shanghai (GitHub schedule cron uses UTC)
   schedule:
     - cron: "0 0 * * 1"
   workflow_dispatch:
 
+# Share the queue with Refresh, without killing an active run.
 concurrency:
   group: ${{ github.repository }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 env:
-  # time zone
   TZ: Asia/Shanghai
-
-  # github access token
   GIST_PAT: ${{ secrets.GIST_PAT }}
-
-  # github username and gist id, separated by '/'
   GIST_LINK: ${{ secrets.GIST_LINK }}
-
-  # the url to the list of airports that you maintain yourself
-  # each line include domain, coupon and invitation code, the domain must be included, and the latter two items are optional
   CUSTOMIZE_LINK: ${{ secrets.CUSTOMIZE_LINK }}
-
-  # include special protocols, such as vless hysteria2 and hysteria
   ENABLE_SPECIAL_PROTOCOLS: ${{ vars.ENABLE_SPECIAL_PROTOCOLS }}
 
 jobs:
   process:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 180
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,12 +46,10 @@ jobs:
               echo "Error: environment 'GIST_PAT' cannot be empty"
               exit 1
           fi
-
           if [ -z "$GIST_LINK" ]; then
               echo "Error: environment 'GIST_LINK' cannot be empty"
               exit 1
           fi
-
           LINK_PARTS=$(echo "$GIST_LINK" | awk -F'/' 'NF==2 && $1!="" && $2!=""')
           if [ -z "$LINK_PARTS" ]; then
               echo "Error: environment 'GIST_LINK' is not valid, should be 'username/gist_id' format"
@@ -65,7 +57,10 @@ jobs:
           fi
 
       - name: Collect
-        run: python -u subscribe/collect.py --all --overwrite --skip
+        # Look back 50 recent Telegram archive pages rather than the entire history.
+        # Skip CAPTCHA-only airports to reduce futile registrations.
+        # Keep --skip for now: runner-side proxy checks can falsely reject CN-usable nodes.
+        run: python -u subscribe/collect.py --all --overwrite --skip --pages 50 --skip-captcha
 
       - name: Timestamp
         run: date
