@@ -33,6 +33,8 @@ class CollectOptions:
     delimiter: str = ""
     allow_gmail_alias: bool = False
     skip_captcha: bool = False
+    max_candidates: int = 0
+    exclude_hosts: tuple[str, ...] = ()
 
 
 @dataclass
@@ -356,6 +358,8 @@ class CcbaoheSource(AirportSource):
                     candidates[address] = words[0] if words else ""
 
             urls = list(candidates.keys())
+            if options.max_candidates > 0:
+                urls = urls[:options.max_candidates]
             redirected = utils.multi_thread_run(
                 func=follow_redirect,
                 tasks=urls,
@@ -383,6 +387,8 @@ class YgpySource(AirportSource):
 
     def crawl(self, options: CollectOptions) -> list[AirportRecord]:
         pages = self._monthly_pages()
+        if options.max_candidates > 0:
+            pages = sorted(pages, reverse=True)[:3]
         if not pages:
             logger.warning(f"[AirPortCollector] cannot get article from url: {self.base_url}")
             return []
@@ -584,7 +590,18 @@ class AirportCollector:
     def collect(self) -> dict[str, AirportRecord]:
         discovered, persisted = self._discover()
         self._persist(persisted)
-        resolved = self._resolve(discovered)
+        # Limit expensive backend/registration probes, not just Telegram pages.
+        candidates, seen = {}, set(self.options.exclude_hosts)
+        for domain, record in discovered.items():
+            host = utils.extract_domain(domain, False).lower()
+            if not host or host in seen:
+                continue
+            seen.add(host)
+            candidates[domain] = record
+            if self.options.max_candidates > 0 and len(candidates) >= self.options.max_candidates:
+                break
+        logger.info(f"[AirPortCollector] probe candidates: {len(candidates)}, discovered: {len(discovered)}")
+        resolved = self._resolve(candidates)
         return self._validate(resolved)
 
     def _discover(self) -> tuple[dict[str, AirportRecord], dict[str, AirportRecord]]:
@@ -640,6 +657,9 @@ class AirportCollector:
         return resolved
 
     def _validate(self, records: list[AirportRecord]) -> dict[str, AirportRecord]:
+        # Different frontends may resolve to the same backend.
+        records = list({record.domain.rstrip('/').lower(): record for record in records
+                        if utils.extract_domain(record.domain, False).lower() not in self.options.exclude_hosts}.values())
         logger.info("[AirPortCollector] extract real base url finished, start to check it now")
         tasks = [[record.domain, self.options.allow_gmail_alias, self.options.skip_captcha] for record in records]
         results = utils.multi_thread_run(
@@ -651,7 +671,7 @@ class AirportCollector:
 
         available: dict[str, AirportRecord] = {}
         for index, record in enumerate(records):
-            accepted, api_prefix = results[index]
+            accepted, api_prefix = results[index] or (False, "")
             if not accepted:
                 continue
             record.api_prefix = api_prefix or ""
@@ -681,6 +701,8 @@ def collect_airport(
     delimiter: str = "",
     allow_gmail_alias: bool = False,
     skip_captcha: bool = False,
+    max_candidates: int = 0,
+    exclude_hosts: tuple[str, ...] = (),
 ) -> dict[str, AirportRecord]:
     options = CollectOptions(
         num_threads=num_threads,
@@ -689,5 +711,7 @@ def collect_airport(
         delimiter=delimiter,
         allow_gmail_alias=allow_gmail_alias,
         skip_captcha=skip_captcha,
+        max_candidates=max_candidates,
+        exclude_hosts=exclude_hosts,
     )
     return AirportCollector.default(channel=channel, page_num=page_num, options=options).collect()

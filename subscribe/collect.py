@@ -19,6 +19,7 @@ import push
 import utils
 import workflow
 import yaml
+import collect_safety as safety
 from airport import AirPort
 from config.models import NodeInput, SiteConfig, StorageItem
 from crawl.helpers import check_status, naming_task
@@ -39,7 +40,7 @@ def assign(
     bin_name: str,
     domains_file: str = "",
     overwrite: bool = False,
-    pages: int = sys.maxsize,
+    pages: int = 50,
     allow_gmail_alias: bool = False,
     display: bool = True,
     num_threads: int = 0,
@@ -59,7 +60,9 @@ def assign(
                 if items:
                     subscriptions.update(items)
 
-        if username and gist_id and access_token:
+        if kwargs.get("existing_subscriptions") is not None:
+            subscriptions.update(kwargs["existing_subscriptions"])
+        elif username and gist_id and access_token:
             push_tool = push.PushToGist(token=access_token)
             url = push_tool.raw_url(item=StorageItem(username=username, gist_id=gist_id, filename=filename))
 
@@ -79,7 +82,7 @@ def assign(
             show_progress=display,
         )
 
-        return [links[i] for i in range(len(links)) if results[i][0] and not results[i][1]]
+        return [link for link, result in zip(links, results) if result and result[0] and not result[1]]
 
     subscribes_file = utils.trim(kwargs.get("subscribes_file", ""))
     access_token = utils.trim(kwargs.get("access_token", ""))
@@ -110,11 +113,15 @@ def assign(
     )
 
     # 仅更新已有订阅
-    if tasks and kwargs.get("refresh", False):
+    if kwargs.get("refresh", False):
         logger.info("skip registering new accounts, will use existing subscriptions for refreshing")
         return tasks
 
+    max_candidates = max(1, int(kwargs.get("max_candidates", 100)))
+    excluded = {utils.extract_domain(x, False).lower() for x in subscriptions}
+
     records: dict[str, AirportRecord] = {}
+    crawled = {}
     delimiter = "@#@#"
     domains_file = utils.trim(domains_file)
     if not domains_file:
@@ -137,17 +144,18 @@ def assign(
             filepath=os.path.join(DATA_BASE, "coupons.txt"),
             delimiter=delimiter,
             skip_captcha=skip_captcha,
+            max_candidates=max_candidates,
+            exclude_hosts=tuple(excluded),
         )
 
         if crawled:
-            for domain, incoming in crawled.items():
-                current = records.get(domain)
-                if current is None:
-                    records[domain] = incoming
-                else:
-                    current.coupon = incoming.coupon
-                    current.api_prefix = incoming.api_prefix
+            # Overwrite means replace the stale catalogue, not append its entire history.
+            records = dict(crawled)
             overwrite = True
+
+    # A failed discovery must not fall back to probing the entire stale catalogue.
+    if overwrite and not crawled:
+        records = {}
 
     # 加载自定义机场列表
     customize_link = utils.trim(kwargs.get("customize_link", ""))
@@ -164,6 +172,7 @@ def assign(
         logger.error("cannot collect any new airport for free use")
         return tasks
 
+    records = select_candidates(records, excluded, max_candidates)
     if overwrite:
         save_records(records=records, filepath=fullpath, delimiter=delimiter, full=True)
 
@@ -192,6 +201,20 @@ def assign(
     return tasks
 
 
+def select_candidates(records, excluded, limit):
+    selected, seen = {}, set(excluded)
+    for domain, record in records.items():
+        host = utils.extract_domain(domain, False).lower()
+        if not host or host in seen or not isurl(domain):
+            continue
+        seen.add(host)
+        selected[domain] = record
+        if len(selected) >= limit:
+            break
+    logger.info(f"candidate budget: selected={len(selected)}, skipped={len(records) - len(selected)}")
+    return selected
+
+
 def aggregate(args: argparse.Namespace) -> None:
     def parse_gist_link(link: str) -> tuple[str, str]:
         # 提取 gist 用户名及 id
@@ -209,6 +232,10 @@ def aggregate(args: argparse.Namespace) -> None:
     access_token = utils.trim(args.key)
     username, gist_id = parse_gist_link(args.gist)
 
+    revision, previous = "", {}
+    if gist_id and access_token:
+        revision, previous = safety.read_gist(gist_id, access_token)
+
     tasks = assign(
         bin_name=subconverter_bin,
         domains_file="domains.txt",
@@ -224,11 +251,13 @@ def aggregate(args: argparse.Namespace) -> None:
         access_token=access_token,
         subscribes_file=subscribes_file,
         customize_link=args.custom_sites,
+        max_candidates=args.max_candidates,
+        existing_subscriptions=safety.subscription_urls(previous.get(subscribes_file, "")) if revision else None,
     )
 
     if not tasks:
         logger.error("cannot found any valid config, exit")
-        sys.exit(0)
+        sys.exit(1)
 
     # 已有订阅已经做过过期检查，无需再测
     old_subscriptions = set()
@@ -242,10 +271,14 @@ def aggregate(args: argparse.Namespace) -> None:
 
     results = pipeline.execute_tasks(tasks)
     proxies = list(itertools.chain.from_iterable([x[1] for x in results if x]))
+    proxies = safety.valid_nodes(proxies)
 
     if len(proxies) == 0:
         logger.error("exit because cannot fetch any proxy node")
-        sys.exit(0)
+        sys.exit(1)
+
+    # Deduplication can merge identical nodes from several healthy subscriptions.
+    fetched_subscriptions = {p["sub"] for p in proxies if p.get("sub")}
 
     nodes, workspace = [], os.path.join(PATH, "clash")
 
@@ -276,26 +309,36 @@ def aggregate(args: argparse.Namespace) -> None:
             [p, clash.EXTERNAL_CONTROLLER, 5000, args.url, args.delay, False] for p in proxies if isinstance(p, dict)
         ]
 
-        masks = utils.multi_thread_run(
-            func=clash.check,
-            tasks=params,
-            num_threads=args.num,
-            show_progress=display,
-        )
-
-        # 关闭clash
         try:
+            if process.poll() is not None:
+                raise safety.PublicationError("proxy checker failed to start; keeping previous publication")
+            masks = utils.multi_thread_run(
+                func=clash.check,
+                tasks=params,
+                num_threads=args.num,
+                show_progress=display,
+            )
+        finally:
             process.terminate()
-        except:
-            logger.error(f"terminate clash process error")
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
 
         nodes = [proxies[i] for i in range(len(proxies)) if masks[i]]
         if len(nodes) <= 0:
             logger.error(f"cannot fetch any proxy")
-            sys.exit(0)
+            sys.exit(1)
 
-    subscriptions = set()
-    for p in proxies:
+    if args.probe_sample:
+        sample = random.sample(nodes, min(len(nodes), args.probe_sample))
+        checks = utils.multi_thread_run(safety.tcp_probe, sample, num_threads=min(args.num, 16))
+        logger.info(f"advisory TCP sample: checked={len(checks)}, reachable={checks.count('reachable')}, "
+                    f"unknown={checks.count('unknown')}, skipped={checks.count('skipped')}; no nodes removed")
+
+    subscriptions = set(fetched_subscriptions) if args.skip else set()
+    for p in nodes:
         # 移除无用的标记
         p.pop("liveness", True)
 
@@ -330,17 +373,22 @@ def aggregate(args: argparse.Namespace) -> None:
         list_only = False if target == "v2ray" or target == "mixed" or "ss" in target else not args.all
         targets.append((convert_name, filename, target, list_only, args.ignore_default_filters))
 
+    artifacts = {}
     for t in targets:
+        output = os.path.join(PATH, "subconverter", t[1])
+        if os.path.isfile(output):
+            os.remove(output)
         success = subconverter.generate_conf(generate_conf, t[0], source, t[1], t[2], True, t[3], t[4])
         if not success:
-            logger.error(f"cannot generate subconverter config file for target: {t[2]}")
-            continue
+            raise safety.PublicationError(f"cannot generate conversion config: {t[2]}")
 
-        if subconverter.convert(binname=subconverter_bin, artifact=t[0]):
-            filepath = os.path.join(DATA_BASE, t[1])
-            shutil.move(os.path.join(PATH, "subconverter", t[1]), filepath)
-
-            records[t[1]] = filepath
+        if not subconverter.convert(binname=subconverter_bin, artifact=t[0]) or not os.path.isfile(output):
+            raise safety.PublicationError(f"conversion failed: {t[2]}; keeping previous publication")
+        with open(output, encoding="utf-8") as handle:
+            content = handle.read()
+        safety.artifact_count(content, t[2])
+        artifacts[t[1]] = (t[2], content)
+        records[t[1]] = output
 
     if len(records) > 0:
         os.remove(supplier)
@@ -366,35 +414,29 @@ def aggregate(args: argparse.Namespace) -> None:
         total = len(urls)
 
         # 筛选出为符合要求的订阅
-        urls = [new_subscriptions[i] for i in range(len(new_subscriptions)) if results[i][0] and not results[i][1]]
+        urls = [link for link, result in zip(new_subscriptions, results) if result and result[0] and not result[1]]
         discard = len(tasks) - len(urls)
 
         # 合并新老订阅
-        urls.extend(list(old_subscriptions))
+        urls.extend(old_subscriptions & subscriptions)
 
         logger.info(f"filter subscriptions finished, total: {total}, found: {len(urls)}, discard: {discard}")
 
-    utils.write_file(filename=os.path.join(DATA_BASE, subscribes_file), lines=urls)
-    domains = [utils.extract_domain(url=x, include_protocal=True) for x in urls]
-
-    # 保存实际可使用的网站列表
-    utils.write_file(filename=os.path.join(DATA_BASE, "valid-domains.txt"), lines=list(set(domains)))
+    safety.check_publication(artifacts, previous, urls)
 
     # 如有必要，上传至 Gist
     if gist_id and access_token:
-        files, item = {}, StorageItem(gist_id=gist_id, filename=list(records.keys())[0])
-
-        for k, v in records.items():
-            if os.path.exists(v) and os.path.isfile(v):
-                with open(v, "r", encoding="utf8") as f:
-                    lines = utils.trim(f.read())
-                    if lines:
-                        files[k] = {"content": lines, "filename": k}
+        item = StorageItem(gist_id=gist_id, filename=list(records.keys())[0])
+        files = {name: {"content": content, "filename": name}
+                 for name, (_, content) in artifacts.items()}
 
         if urls:
             files[subscribes_file] = {"content": "\n".join(urls), "filename": subscribes_file}
 
         if files:
+            current_revision, _ = safety.read_gist(gist_id, access_token)
+            if current_revision != revision:
+                raise safety.PublicationError("gist changed during collection; keeping newer publication")
             push_client = push.PushToGist(token=access_token)
 
             # 上传
@@ -402,7 +444,13 @@ def aggregate(args: argparse.Namespace) -> None:
             if success:
                 logger.info(f"upload proxies and subscriptions to gist successed")
             else:
-                logger.error(f"upload proxies and subscriptions to gist failed")
+                raise safety.PublicationError("upload failed; local subscriptions were not replaced")
+
+    for filename, source_path in records.items():
+        shutil.move(source_path, os.path.join(DATA_BASE, filename))
+    utils.write_file(filename=os.path.join(DATA_BASE, subscribes_file), lines=sorted(set(urls)))
+    domains = [utils.extract_domain(url=x, include_protocal=True) for x in urls]
+    utils.write_file(filename=os.path.join(DATA_BASE, "valid-domains.txt"), lines=sorted(set(domains)))
 
     # 清理工作空间
     workflow.cleanup(workspace, [])
@@ -544,7 +592,7 @@ if __name__ == "__main__":
         "--pages",
         type=int,
         required=False,
-        default=sys.maxsize,
+        default=50,
         help="max page number when crawling telegram",
     )
 
@@ -602,4 +650,13 @@ if __name__ == "__main__":
         help="the url to the list of airports that you maintain yourself",
     )
 
-    aggregate(args=parser.parse_args())
+    parser.add_argument("--max-candidates", type=int, default=100, help="maximum new airports per collection")
+    parser.add_argument("--probe-sample", type=int, default=0, help="advisory public TCP endpoint sample; never removes nodes")
+    args = parser.parse_args()
+    if args.max_candidates < 1 or args.probe_sample < 0:
+        parser.error("max-candidates must be positive and probe-sample must be nonnegative")
+    try:
+        aggregate(args=args)
+    except safety.PublicationError as exc:
+        logger.error(str(exc))
+        sys.exit(1)
