@@ -111,9 +111,12 @@ class AssignmentTests(unittest.TestCase):
     @patch("collect.collect_airport")
     @patch("collect.check_status", return_value=(False, False))
     def test_refresh_empty_never_discovers(self, status, discover):
-        for sources in (set(), {"https://source.example/sub"}):
-            self.assertEqual(collect.assign("converter", refresh=True, overwrite=True,
-                                           subscribes_file="subscribes.txt", existing_subscriptions=sources), [])
+        self.assertEqual(collect.assign("converter", refresh=True, overwrite=True,
+                                        subscribes_file="subscribes.txt", existing_subscriptions=set()), [])
+        with self.assertRaises(safety.PublicationError):
+            collect.assign("converter", refresh=True, overwrite=True,
+                           subscribes_file="subscribes.txt",
+                           existing_subscriptions={"https://source.example/sub"})
         discover.assert_not_called()
 
     @patch("collect.collect_airport")

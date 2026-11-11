@@ -82,7 +82,18 @@ def assign(
             show_progress=display,
         )
 
-        return [link for link, result in zip(links, results) if result and result[0] and not result[1]]
+        # Temporary network failures must not silently delete subscriptions.
+        # Fail this publication and leave the last known-good Gist unchanged.
+        # Clearly expired links (404, explicit bad token, expired quota) may
+        # be removed, but only after all other sources have been classified.
+        temporary = sum(1 for result in results if not result or (not result[0] and not result[1]))
+        if temporary:
+            raise safety.PublicationError(
+                f"{temporary} previous subscription(s) temporarily unavailable; keeping previous Gist publication"
+            )
+        active = [link for link, result in zip(links, results) if result and result[0] and not result[1]]
+        logger.info(f"subscription verification: active={len(active)}, expired_or_invalid={len(links) - len(active)}")
+        return active
 
     subscribes_file = utils.trim(kwargs.get("subscribes_file", ""))
     access_token = utils.trim(kwargs.get("access_token", ""))

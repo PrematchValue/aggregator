@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import gzip
+import hashlib
+import os
+from datetime import date
 import itertools
 import json
 import random
@@ -592,7 +595,13 @@ class AirportCollector:
         self._persist(persisted)
         # Limit expensive backend/registration probes, not just Telegram pages.
         candidates, seen = {}, set(self.options.exclude_hosts)
-        for domain, record in discovered.items():
+        # Select a different deterministic sample on each GitHub run, instead
+        # of rechecking the same first 100 historical records every week.
+        run_id = os.environ.get("GITHUB_RUN_ID")
+        seed = (run_id + ":" + os.environ.get("GITHUB_RUN_ATTEMPT", "1")) if run_id else date.today().strftime("%G-W%V")
+        ordered = sorted(discovered.items(), key=lambda item: hashlib.sha256(
+            (seed + "\x00" + item[0]).encode("utf-8")).digest())
+        for domain, record in ordered:
             host = utils.extract_domain(domain, False).lower()
             if not host or host in seen:
                 continue

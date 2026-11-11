@@ -196,7 +196,7 @@ def check_status(
     remain: float = 0,
     spare_time: float = 0,
     tolerance: float = 0,
-    connectable: bool = True,
+    connectable: bool = False,
 ) -> tuple[bool, bool]:
     """
     url: subscription link
@@ -233,17 +233,17 @@ def check_status(
 
         if _should_reject_response(response):
             logger.debug(f"[Validate] reject by header: {utils.mask(url)}")
-            return False, True
+            return False, False
 
         subscription = response.getheader("subscription-userinfo")
         raw = _read_subscription_body(response, deadline=deadline)
         if raw is None:
-            return False, True
+            return False, False
 
         try:
             content = raw.decode("utf-8")
         except UnicodeDecodeError:
-            return False, True
+            return False, False
 
         if len(content) < 32:
             return False, False
@@ -257,7 +257,7 @@ def check_status(
         lines = [line for line in content.splitlines() if line.strip()]
         if lines and all(airport.AirPort.check_protocol(line) for line in lines):
             return True, False
-        return False, True
+        return False, False
     except urllib.error.HTTPError as e:
         try:
             message = str(e.read(4096), encoding="utf8")
@@ -297,38 +297,42 @@ def check_status(
 
 
 def is_expired(header: str, remain: float = 0, spare_time: float = 0, tolerance: float = 0) -> tuple[bool, bool]:
+    """Handle untrusted subscription-userinfo using only bounded integers.
+
+    Malformed or incomplete quota metadata does not prove expiry. check_status
+    has separately validated the subscription body before calling this parser.
+    """
     if utils.isblank(header):
         return True, False
 
-    remain, spare_time, tolerance = (
-        max(0, remain),
-        max(spare_time, 0),
-        max(tolerance, 0),
-    )
+    counters = {}
     try:
-        infos = header.split(";")
-        upload, download, total, expire = 0, 0, 0, None
-        for info in infos:
-            words = info.split("=", maxsplit=1)
-            if len(words) <= 1:
+        for info in header.split(";"):
+            key, separator, raw = info.partition("=")
+            key = key.strip().lower()
+            if not separator or key not in {"upload", "download", "total", "expire"}:
                 continue
+            value = raw.strip()
+            if key == "expire" and not value:
+                continue
+            if not re.fullmatch(r"[0-9]{1,19}", value):
+                return True, False
+            number = int(value)
+            if number > 9223372036854775807:
+                return True, False
+            counters[key] = number
 
-            if "upload" == words[0].strip():
-                upload = eval(words[1])
-            elif "download" == words[0].strip():
-                download = eval(words[1])
-            elif "total" == words[0].strip():
-                total = eval(words[1])
-            elif "expire" == words[0].strip():
-                expire = None if utils.isblank(words[1]) else eval(words[1])
-
-        # 剩余流量大于 ${remain} GB 并且未过期则返回 True，否则返回 False
-        flag = total - (upload + download) > remain * pow(1024, 3) and (
-            expire is None or expire - time.time() > spare_time * 3600
-        )
-        expired = False if flag else (expire is not None and (expire + tolerance * 3600) <= time.time())
-        return flag, expired
-    except:
+        if not {"upload", "download", "total"}.issubset(counters):
+            return True, False
+        remaining = counters["total"] - counters["upload"] - counters["download"]
+        needed = max(float(remain), 0.0) * 1024 ** 3
+        expire = counters.get("expire")
+        now = time.time()
+        if expire is not None and expire + max(float(tolerance), 0.0) * 3600 <= now:
+            return False, True
+        active = remaining > needed and (expire is None or expire - now > max(float(spare_time), 0.0) * 3600)
+        return active, False
+    except (ValueError, TypeError, OverflowError):
         return True, False
 
 
