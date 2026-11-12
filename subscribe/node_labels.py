@@ -100,9 +100,10 @@ def relabel_and_sort(
         from location import ISO_TO_CHINESE
         countries = ISO_TO_CHINESE
     if batch_query is None or query_func is None:
-        from location import batch_query as real_batch_query, locate_by_ipinfo
+        from location import batch_query as real_batch_query
+        from egress_region import locate_with_fallback
         batch_query = batch_query or real_batch_query
-        query_func = query_func or locate_by_ipinfo
+        query_func = query_func or locate_with_fallback
 
     old = _history(previous_clash, countries)
     items = [copy.deepcopy(proxy) for proxy in proxies]

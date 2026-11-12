@@ -352,6 +352,7 @@ def aggregate(args: argparse.Namespace) -> None:
     if getattr(args, "geo_rename", False):
         from node_labels import relabel_and_sort
 
+        original_types = [p.get('type', 'unknown') for p in nodes if isinstance(p, dict)]
         nodes, geo_stats = relabel_and_sort(
             nodes,
             previous_clash=previous.get("clash.yaml", ""),
@@ -365,6 +366,10 @@ def aggregate(args: argparse.Namespace) -> None:
         from node_labels import only_confirmed
         nodes, removed_unknown = only_confirmed(nodes)
         logger.info(f"地区筛选：保留={len(nodes)}，剔除未知={removed_unknown}")
+        from egress_region import format_protocol_summary
+        logger.info("地区筛选按协议：" + format_protocol_summary(
+            original_types, [p.get('type', 'unknown') for p in nodes if isinstance(p, dict)]
+        ))
         if not nodes:
             raise safety.PublicationError("no region-confirmed nodes; keeping previous Gist publication")
 
