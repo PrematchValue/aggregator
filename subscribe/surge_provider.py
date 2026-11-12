@@ -12,7 +12,7 @@ import re
 # aggregator's Surge artifact validation. Unsupported protocols are omitted.
 PROXY_TYPES = frozenset({
     "ss", "ssr", "vmess", "trojan", "http", "https", "socks5",
-    "socks5-tls", "snell", "tuic", "hysteria2", "wireguard",
+    "socks5-tls", "snell", "tuic", "tuic-v5", "hysteria2", "wireguard",
 })
 SECTION_RE = re.compile(r"^\[([^\]]+)\]$")
 POLICY_RE = re.compile(r"^([^=\r\n]+?)\s*=\s*([a-zA-Z][a-zA-Z0-9-]*)\s*,\s*(\S.*)$")

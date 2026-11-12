@@ -417,6 +417,27 @@ def aggregate(args: argparse.Namespace) -> None:
             raise safety.PublicationError(f"conversion failed: {t[2]}; keeping previous publication")
         with open(output, encoding="utf-8") as handle:
             content = handle.read()
+        if t[2] == "v2ray" and not content.strip():
+            # The legacy SubConverter can report success while producing an
+            # empty v2rayN artifact for newer protocols (e.g. Hysteria2/TUIC).
+            # Fallback only for this one format, and only from the SAME set of
+            # country-confirmed nodes used in all other formats.
+            from v2ray_fallback import build_subscription
+
+            try:
+                content, skipped = build_subscription(nodes)
+            except ValueError:
+                raise safety.PublicationError(
+                    "v2ray converter returned empty and no compatible URI can be built; "
+                    "keeping previous Gist publication"
+                ) from None
+            with open(output, "w", encoding="utf-8") as fallback_file:
+                fallback_file.write(content)
+            logger.info(
+                f"V2ray 转换器输出为空，已使用兼容协议链接兜底："
+                f"生成={safety.artifact_count(content, 'v2ray')}，"
+                f"不支持协议数={sum(skipped.values())}；不输出凭据"
+            )
         safety.artifact_count(content, t[2])
         artifacts[t[1]] = (t[2], content)
         records[t[1]] = output

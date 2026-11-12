@@ -251,6 +251,43 @@ class AggregateTests(unittest.TestCase):
                 collect.aggregate(self.args)
         self.assert_no_publish()
 
+    def test_empty_v2ray_uses_confirmed_nodes_only(self):
+        self.args.geo_rename = True
+        def label(proxies, **kwargs):
+            labeled = [dict(p, name=("🇭🇰 香港 001" if i == 0 else f"🌐 未知地区 {i:03d}"))
+                       for i, p in enumerate(proxies)]
+            return labeled, {"total": len(labeled), "fresh": 1, "historical": 0,
+                             "unknown": len(labeled) - 1}
+        self.mocks["pipeline.execute_tasks"].return_value = [(1, [dict(node(0), type="trojan", password="test-only")])]
+        def partial_converter(binname, artifact):
+            if artifact == "convert_v2ray":
+                (self.root / "subconverter" / "v2ray.txt").write_text("", encoding="utf-8")
+                return True
+            return self.convert(binname, artifact)
+        self.mocks["subconverter.convert"].side_effect = partial_converter
+        with patch("node_labels.relabel_and_sort", side_effect=label):
+            collect.aggregate(self.args)
+        payload = self.mocks["push.PushToGist"].return_value.push_to.call_args.kwargs["payload"]
+        encoded = payload["files"]["v2ray.txt"]["content"]
+        decoded = base64.b64decode(encoded).decode("utf-8")
+        self.assertIn("trojan://", decoded)
+        self.assertIn("%E9%A6%99%E6%B8%AF", decoded)
+        self.assertNotIn("%E6%9C%AA%E7%9F%A5", decoded)
+        self.assertEqual(safety.artifact_count(encoded, "v2ray"), 1)
+        self.assertIn("surge-proxy.conf", payload["files"])
+
+    def test_empty_v2ray_no_safe_fallback_blocks_publication(self):
+        def partial_converter(binname, artifact):
+            if artifact == "convert_v2ray":
+                (self.root / "subconverter" / "v2ray.txt").write_text("", encoding="utf-8")
+                return True
+            return self.convert(binname, artifact)
+        self.mocks["subconverter.convert"].side_effect = partial_converter
+        with patch("v2ray_fallback.build_subscription", side_effect=ValueError("unsupported type")):
+            with self.assertRaises(safety.PublicationError):
+                collect.aggregate(self.args)
+        self.assert_no_publish()
+
     def test_unreadable_baseline_aborts_before_collection(self):
         self.mocks["safety.read_gist"].side_effect = safety.PublicationError("baseline unavailable")
         with self.assertRaises(safety.PublicationError):

@@ -18,6 +18,11 @@ class SurgeListTests(unittest.TestCase):
             '🇯🇵 日本 001 = ss, j.example, 443, encrypt-method=aes-128-gcm, password=test',
         ])
 
+    def test_tuic_v5_is_a_real_proxy(self):
+        text = "[Proxy]\n🇸🇬 新加坡 001 = tuic-v5, host, 443, uuid=x, password=y\n全球直连 = direct\n"
+        self.assertEqual(proxy_lines_only(text),
+                         "🇸🇬 新加坡 001 = tuic-v5, host, 443, uuid=x, password=y\n")
+
     def test_list_without_section(self):
         source = '# hello\n香港 001 = socks5, host, 1080\n直连 = direct\n'
         self.assertEqual(proxy_lines_only(source), '香港 001 = socks5, host, 1080\n')
