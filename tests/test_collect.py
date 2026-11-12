@@ -113,10 +113,10 @@ class AssignmentTests(unittest.TestCase):
     def test_refresh_empty_never_discovers(self, status, discover):
         self.assertEqual(collect.assign("converter", refresh=True, overwrite=True,
                                         subscribes_file="subscribes.txt", existing_subscriptions=set()), [])
-        with self.assertRaises(safety.PublicationError):
-            collect.assign("converter", refresh=True, overwrite=True,
-                           subscribes_file="subscribes.txt",
-                           existing_subscriptions={"https://source.example/sub"})
+        tasks = collect.assign("converter", refresh=True, overwrite=True,
+                               subscribes_file="subscribes.txt",
+                               existing_subscriptions={"https://source.example/sub"})
+        self.assertEqual(len(tasks), 1)  # Unresolved is retryable, not expired.
         discover.assert_not_called()
 
     @patch("collect.collect_airport")
@@ -212,7 +212,32 @@ class AggregateTests(unittest.TestCase):
         self.mocks["pipeline.execute_tasks"].return_value = [(1, [dict(node(), sub=url) for url in urls])]
         collect.aggregate(self.args)
         payload = self.mocks["push.PushToGist"].return_value.push_to.call_args.kwargs["payload"]
+        self.assertEqual(set(payload["files"]["subscribes.txt"]["content"].splitlines()),
+                         set(urls) | {"https://source.example/sub"})
+
+    def test_unfetched_existing_subscription_is_not_deleted_from_gist(self):
+        urls = ["https://source.example/sub", "https://intermittent.example/sub"]
+        self.files["subscribes.txt"] = "\n".join(urls)
+        self.mocks["assign"].return_value = [
+            collect.TaskConfig(name=f"old{i}", bin_name="converter", nodes=collect.NodeInput(subscribe=url))
+            for i, url in enumerate(urls)
+        ]
+        # Only the first source returned nodes in this run.
+        self.mocks["pipeline.execute_tasks"].return_value = [(1, [node(i) for i in range(4)])]
+        collect.aggregate(self.args)
+        payload = self.mocks["push.PushToGist"].return_value.push_to.call_args.kwargs["payload"]
         self.assertEqual(set(payload["files"]["subscribes.txt"]["content"].splitlines()), set(urls))
+
+    def test_unresolved_source_blocks_shrinking_gist_not_collection(self):
+        original = self.mocks["assign"].return_value
+        def unresolved_assign(**kwargs):
+            kwargs["unresolved_sources"].add("https://source.example/sub")
+            return original
+        self.mocks["assign"].side_effect = unresolved_assign
+        self.mocks["pipeline.execute_tasks"].return_value = [(1, [node(i) for i in range(3)])]
+        with self.assertRaisesRegex(safety.PublicationError, "temporarily unreachable"):
+            collect.aggregate(self.args)
+        self.assert_no_publish()
 
     @patch("collect.safety.tcp_probe", return_value="unknown")
     def test_advisory_failure_does_not_remove_nodes(self, probe):

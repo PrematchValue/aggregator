@@ -43,10 +43,34 @@ class SubscriptionHeaderTests(unittest.TestCase):
 
 class RefreshSourceTests(unittest.TestCase):
     @patch("collect.check_status", return_value=(False, False))
-    def test_transient_failure_blocks_publication(self, check):
+    def test_transient_failure_preserves_source_for_retry(self, check):
         with tempfile.TemporaryDirectory() as work, patch.object(collect, "DATA_BASE", work):
-            with self.assertRaises(safety.PublicationError):
-                collect.assign("converter", refresh=True, subscribes_file="subscribes.txt", existing_subscriptions={"https://example.org/sub"}, display=False)
+            unresolved = set()
+            tasks = collect.assign("converter", refresh=True, subscribes_file="subscribes.txt",
+                                   existing_subscriptions={"https://example.org/sub"}, display=False,
+                                   unresolved_sources=unresolved)
+            self.assertEqual(len(tasks), 1)
+            self.assertEqual(tasks[0].nodes.subscribe_list(), ["https://example.org/sub"])
+            self.assertEqual(unresolved, {"https://example.org/sub"})
+
+    @patch("collect.pipeline.assign_sites", return_value=([], {}))
+    @patch("collect.collect_airport", return_value={})
+    @patch("collect.check_status", return_value=(False, False))
+    def test_transient_failure_does_not_block_collect(self, check, discovery, sites):
+        with tempfile.TemporaryDirectory() as work, patch.object(collect, "DATA_BASE", work):
+            tasks = collect.assign("converter", refresh=False, overwrite=True,
+                                   subscribes_file="subscribes.txt",
+                                   existing_subscriptions={"https://example.org/sub"}, display=False)
+            self.assertEqual(len(tasks), 1)
+            discovery.assert_called_once()
+
+    @patch("collect.utils.multi_thread_run", return_value=[])
+    def test_missing_status_results_are_transient_not_expiry(self, runner):
+        with tempfile.TemporaryDirectory() as work, patch.object(collect, "DATA_BASE", work):
+            tasks = collect.assign("converter", refresh=True,
+                                   subscribes_file="subscribes.txt",
+                                   existing_subscriptions={"https://example.org/sub"}, display=False)
+            self.assertEqual(len(tasks), 1)
 
     @patch("collect.check_status", return_value=(False, True))
     def test_explicit_expiry_still_removes_source(self, check):

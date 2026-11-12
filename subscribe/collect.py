@@ -82,18 +82,33 @@ def assign(
             show_progress=display,
         )
 
-        # Temporary network failures must not silently delete subscriptions.
-        # Fail this publication and leave the last known-good Gist unchanged.
-        # Clearly expired links (404, explicit bad token, expired quota) may
-        # be removed, but only after all other sources have been classified.
-        temporary = sum(1 for result in results if not result or (not result[0] and not result[1]))
-        if temporary:
-            raise safety.PublicationError(
-                f"{temporary} previous subscription(s) temporarily unavailable; keeping previous Gist publication"
-            )
-        active = [link for link, result in zip(links, results) if result and result[0] and not result[1]]
-        logger.info(f"subscription verification: active={len(active)}, expired_or_invalid={len(links) - len(active)}")
-        return active
+        # A temporary timeout or an incomplete status response is NOT expiry
+        # proof. Keep such URLs for retry by pipeline.execute_tasks instead of
+        # blocking an entire Collect/Refresh or silently deleting the source.
+        # Only explicit expiry (the second status flag) permits deletion.
+        responses = list(results or [])
+        active, unresolved, expired = [], [], []
+        for index, link in enumerate(links):
+            result = responses[index] if index < len(responses) else None
+            if isinstance(result, (tuple, list)) and len(result) >= 2:
+                if result[1]:
+                    expired.append(link)
+                elif result[0]:
+                    active.append(link)
+                else:
+                    unresolved.append(link)
+            else:
+                unresolved.append(link)
+
+        # Return details to aggregate without changing assign's return type.
+        unresolved_sources = kwargs.get("unresolved_sources")
+        if isinstance(unresolved_sources, set):
+            unresolved_sources.update(unresolved)
+        logger.info(
+            f"历史订阅校验：正常={len(active)}，暂不可达={len(unresolved)}，"
+            f"明确过期={len(expired)}；暂不可达保留并继续采集"
+        )
+        return active + unresolved
 
     subscribes_file = utils.trim(kwargs.get("subscribes_file", ""))
     access_token = utils.trim(kwargs.get("access_token", ""))
@@ -247,6 +262,7 @@ def aggregate(args: argparse.Namespace) -> None:
     if gist_id and access_token:
         revision, previous = safety.read_gist(gist_id, access_token)
 
+    unresolved_sources: set[str] = set()
     tasks = assign(
         bin_name=subconverter_bin,
         domains_file="domains.txt",
@@ -264,6 +280,7 @@ def aggregate(args: argparse.Namespace) -> None:
         customize_link=args.custom_sites,
         max_candidates=args.max_candidates,
         existing_subscriptions=safety.subscription_urls(previous.get(subscribes_file, "")) if revision else None,
+        unresolved_sources=unresolved_sources,
     )
 
     if not tasks:
@@ -394,8 +411,12 @@ def aggregate(args: argparse.Namespace) -> None:
         if sub:
             subscriptions.add(sub)
 
+    # Keep all previous subscriptions that were not explicitly expired,
+    # including sources that gave no nodes in this run due to a transient
+    # network error. Otherwise they would vanish from subscribes.txt/Gist.
+    subscriptions.update(old_subscriptions)
     data = {"proxies": nodes}
-    urls = list(subscriptions)
+    urls = sorted(subscriptions)
     source = "proxies.yaml"
 
     # 如果文件夹不存在则创建
@@ -506,6 +527,19 @@ def aggregate(args: argparse.Namespace) -> None:
         logger.info(f"filter subscriptions finished, total: {total}, found: {len(urls)}, discard: {discard}")
 
     safety.check_publication(artifacts, previous, urls)
+    if unresolved_sources and previous.get("clash.yaml"):
+        # An intermittent historical source must never cause a node-count
+        # decrease to replace the last known-good publication. Discovery and
+        # conversion still run, so new nodes can be published once they offset
+        # the missing source. The stronger guard applies only to transient
+        # failures; the ordinary 50% threshold remains for all other runs.
+        old_count = safety.artifact_count(previous["clash.yaml"], "clash")
+        if len(nodes) < old_count:
+            raise safety.PublicationError(
+                f"{len(unresolved_sources)} historical source(s) temporarily unreachable; "
+                f"retaining previous Gist because node count would fall "
+                f"({old_count} -> {len(nodes)})"
+            )
 
     # 如有必要，上传至 Gist
     if gist_id and access_token:
