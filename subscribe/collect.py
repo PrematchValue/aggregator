@@ -348,6 +348,21 @@ def aggregate(args: argparse.Namespace) -> None:
         logger.info(f"advisory TCP sample: checked={len(checks)}, reachable={checks.count('reachable')}, "
                     f"unknown={checks.count('unknown')}, skipped={checks.count('skipped')}; no nodes removed")
 
+    # Label only after final node selection: never change collection or liveness decisions.
+    if getattr(args, "geo_rename", False):
+        from node_labels import relabel_and_sort
+
+        nodes, geo_stats = relabel_and_sort(
+            nodes,
+            previous_clash=previous.get("clash.yaml", ""),
+            num_threads=min(max(1, args.num), 24),
+            chunk_size=80,
+        )
+        logger.info(
+            f"地区整理：总数={geo_stats['total']}，出口新确认={geo_stats['fresh']}，"
+            f"沿用历史地区={geo_stats['historical']}，未知={geo_stats['unknown']}；不删除节点"
+        )
+
     subscriptions = set(fetched_subscriptions) if args.skip else set()
     for p in nodes:
         # 移除无用的标记
@@ -389,7 +404,7 @@ def aggregate(args: argparse.Namespace) -> None:
         output = os.path.join(PATH, "subconverter", t[1])
         if os.path.isfile(output):
             os.remove(output)
-        success = subconverter.generate_conf(generate_conf, t[0], source, t[1], t[2], True, t[3], t[4])
+        success = subconverter.generate_conf(generate_conf, t[0], source, t[1], t[2], not getattr(args, 'geo_rename', False), t[3], t[4])
         if not success:
             raise safety.PublicationError(f"cannot generate conversion config: {t[2]}")
 
@@ -661,6 +676,7 @@ if __name__ == "__main__":
         help="the url to the list of airports that you maintain yourself",
     )
 
+    parser.add_argument("--geo-rename", action="store_true", help="identify egress location and sort nodes")
     parser.add_argument("--max-candidates", type=int, default=100, help="maximum new airports per collection")
     parser.add_argument("--probe-sample", type=int, default=0, help="advisory public TCP endpoint sample; never removes nodes")
     args = parser.parse_args()

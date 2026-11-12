@@ -58,7 +58,7 @@ jobs:
 
       - name: Refresh
         # Refresh existing subscriptions; don't republish with Github-only liveness tests.
-        run: python -u subscribe/collect.py --all --refresh --skip --probe-sample 50 -t clash v2ray singbox surge
+        run: python -u subscribe/collect.py --all --refresh --skip --probe-sample 50 --geo-rename -t clash v2ray singbox surge
 
       - name: Timestamp
         run: date
