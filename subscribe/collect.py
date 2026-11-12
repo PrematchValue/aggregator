@@ -360,8 +360,13 @@ def aggregate(args: argparse.Namespace) -> None:
         )
         logger.info(
             f"地区整理：总数={geo_stats['total']}，出口新确认={geo_stats['fresh']}，"
-            f"沿用历史地区={geo_stats['historical']}，未知={geo_stats['unknown']}；不删除节点"
+            f"沿用历史地区={geo_stats['historical']}，未知={geo_stats['unknown']}；筛除未知地区"
         )
+        from node_labels import only_confirmed
+        nodes, removed_unknown = only_confirmed(nodes)
+        logger.info(f"地区筛选：保留={len(nodes)}，剔除未知={removed_unknown}")
+        if not nodes:
+            raise safety.PublicationError("no region-confirmed nodes; keeping previous Gist publication")
 
     subscriptions = set(fetched_subscriptions) if args.skip else set()
     for p in nodes:
@@ -415,6 +420,20 @@ def aggregate(args: argparse.Namespace) -> None:
         safety.artifact_count(content, t[2])
         artifacts[t[1]] = (t[2], content)
         records[t[1]] = output
+        if t[2] == "surge":
+            # Preserve the full surge.conf for direct import. The policy-path
+            # resource must contain only real proxy declarations, not DIRECT,
+            # GLOBAL-DIRECT, policy groups or [Rule] entries.
+            from surge_provider import proxy_lines_only
+
+            provider_content = proxy_lines_only(content)
+            safety.artifact_count(provider_content, "surge")
+            provider_name = "surge-proxy.conf"
+            provider_path = os.path.join(PATH, "subconverter", provider_name)
+            with open(provider_path, "w", encoding="utf-8") as provider_file:
+                provider_file.write(provider_content)
+            artifacts[provider_name] = ("surge", provider_content)
+            records[provider_name] = provider_path
 
     if len(records) > 0:
         os.remove(supplier)

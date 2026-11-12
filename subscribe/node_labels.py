@@ -162,3 +162,16 @@ def relabel_and_sort(
 
     counts = {"total": len(items), "fresh": len(checked), "historical": cached, "unknown": len(groups.get(UNKNOWN, []))}
     return results, counts
+
+
+def only_confirmed(proxies: list[dict]) -> tuple[list[dict], int]:
+    """Keep only recognized country-flagged nodes after relabel_and_sort.
+
+    Does not change proxy parameters or mutate the source list. Historical
+    confirmed egress regions remain eligible; unknown never masquerades as US.
+    """
+    kept = []
+    for proxy in proxies:
+        if isinstance(proxy, dict) and LABEL_RE.fullmatch(str(proxy.get("name", ""))):
+            kept.append(proxy)
+    return kept, len(proxies) - len(kept)

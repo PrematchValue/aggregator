@@ -203,7 +203,7 @@ class AggregateTests(unittest.TestCase):
         client.push_to.assert_called_once()
         kwargs = client.push_to.call_args.kwargs
         self.assertEqual(kwargs["item"].gist_id, "aabbcc")
-        self.assertEqual(set(kwargs["payload"]["files"]), {"clash.yaml", "v2ray.txt", "singbox.json", "surge.conf", "subscribes.txt"})
+        self.assertEqual(set(kwargs["payload"]["files"]), {"clash.yaml", "v2ray.txt", "singbox.json", "surge.conf", "surge-proxy.conf", "subscribes.txt"})
         self.assertTrue((self.root / "data" / "subscribes.txt").is_file())
 
     def test_deduplication_keeps_successful_source_urls(self):
@@ -220,6 +220,36 @@ class AggregateTests(unittest.TestCase):
         collect.aggregate(self.args)
         self.assertEqual(probe.call_count, 2)
         self.mocks["push.PushToGist"].return_value.push_to.assert_called_once()
+
+    def test_geo_only_confirmed_exported(self):
+        self.args.geo_rename = True
+        def fake_labels(proxies, **kwargs):
+            labeled = [dict(p, name=("🇭🇰 香港 001" if i == 0 else f"🌐 未知地区 {i:03d}"))
+                       for i, p in enumerate(proxies)]
+            return labeled, {"total": len(labeled), "fresh": 1, "historical": 0,
+                             "unknown": len(labeled) - 1}
+        seen = []
+        def convert_and_inspect(binname, artifact):
+            imported = yaml.safe_load((self.root / "subconverter" / "proxies.yaml").read_text(encoding="utf-8"))
+            seen.append([p["name"] for p in imported["proxies"]])
+            return self.convert(binname, artifact)
+        with patch("node_labels.relabel_and_sort", side_effect=fake_labels):
+            self.mocks["subconverter.convert"].side_effect = convert_and_inspect
+            collect.aggregate(self.args)
+        self.assertEqual(seen, [["🇭🇰 香港 001"]] * 4)
+        payload = self.mocks["push.PushToGist"].return_value.push_to.call_args.kwargs["payload"]
+        self.assertIn("surge-proxy.conf", payload["files"])
+        self.assertNotIn("GLOBAL-DIRECT", payload["files"]["surge-proxy.conf"]["content"])
+
+    def test_geo_all_unknown_blocks_publication(self):
+        self.args.geo_rename = True
+        def unknown(proxies, **kwargs):
+            return [dict(p, name=f"🌐 未知地区 {i:03d}") for i, p in enumerate(proxies)], {
+                "total": len(proxies), "fresh": 0, "historical": 0, "unknown": len(proxies)}
+        with patch("node_labels.relabel_and_sort", side_effect=unknown):
+            with self.assertRaises(safety.PublicationError):
+                collect.aggregate(self.args)
+        self.assert_no_publish()
 
     def test_unreadable_baseline_aborts_before_collection(self):
         self.mocks["safety.read_gist"].side_effect = safety.PublicationError("baseline unavailable")
