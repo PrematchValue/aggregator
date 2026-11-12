@@ -138,12 +138,12 @@ def assign(
         else []
     )
 
-    # 仅更新已有订阅
+    # Refresh also discovers and registers new airports. Only its execution
+    # window differs from weekly Collect. Existing subscriptions are updated.
     if kwargs.get("refresh", False):
-        logger.info("skip registering new accounts, will use existing subscriptions for refreshing")
-        return tasks
+        logger.info("Refresh：全量发现，轮换执行新机场，同时维护已有订阅")
 
-    max_candidates = max(1, int(kwargs.get("max_candidates", 100)))
+    max_candidates = max(0, int(kwargs.get("max_candidates", 100)))
     excluded = {utils.extract_domain(x, False).lower() for x in subscriptions}
 
     records: dict[str, AirportRecord] = {}
@@ -172,8 +172,7 @@ def assign(
             skip_captcha=skip_captcha,
             max_candidates=max_candidates,
             exclude_hosts=tuple(excluded),
-            incremental_state=kwargs.get("incremental_state"),
-            checkpoint=kwargs.get("checkpoint"),
+            rotation=kwargs.get("rotation"),
         )
 
         if crawled:
@@ -237,7 +236,7 @@ def select_candidates(records, excluded, limit):
             continue
         seen.add(host)
         selected[domain] = record
-        if len(selected) >= limit:
+        if limit > 0 and len(selected) >= limit:
             break
     logger.info(f"candidate budget: selected={len(selected)}, skipped={len(records) - len(selected)}")
     return selected
@@ -264,28 +263,15 @@ def aggregate(args: argparse.Namespace) -> None:
     if gist_id and access_token:
         revision, previous = safety.read_gist(gist_id, access_token)
 
-    checkpoint = None
-    if getattr(args, "incremental", False):
-        if not gist_id or not access_token:
-            raise safety.PublicationError("incremental mode requires Gist credentials for durable checkpoints")
-        from scan_state import GistCheckpoint
-        # Fail early on corrupt historical artifacts rather than discovering
-        # problems only after lengthy collection and conversion.
-        known_formats = {"clash.yaml": "clash", "v2ray.txt": "v2ray",
-                         "singbox.json": "singbox", "surge.conf": "surge",
-                         "surge-proxy.conf": "surge"}
-        baseline_counts = {}
-        for filename, target in known_formats.items():
-            if previous.get(filename):
-                baseline_counts[target] = safety.artifact_count(previous[filename], target)
-        logger.info(f"订阅发布预检通过：旧文件={len(baseline_counts)}，"
-                    f"历史 Clash 节点={baseline_counts.get('clash', 0)}")
-        checkpoint = GistCheckpoint(gist_id, access_token, previous)
-        # Verify Gist PATCH permission BEFORE any costly hour-long scan.
-        checkpoint.save()
-        logger.info("Gist 断点写入预检通过；正式订阅未修改")
-        logger.info(f"持久化扫描状态：已有机场记录={len(checkpoint.state.sites)}，"
-                    f"节点检测记录={len(checkpoint.state.nodes)}；仅保存哈希与状态")
+    # A small rotation ledger is saved once after Refresh airport execution.
+    # No per-batch Gist checkpoints, repeated reads, or preflight PATCH writes.
+    rotation = None
+    if args.refresh:
+        from refresh_rotation import RefreshRotation
+        try:
+            rotation = RefreshRotation.load(previous.get("refresh-rotation.json", ""))
+        except (ValueError, TypeError) as exc:
+            raise safety.PublicationError("invalid refresh rotation state; keeping previous publication") from None
 
     unresolved_sources: set[str] = set()
     tasks = assign(
@@ -306,11 +292,14 @@ def aggregate(args: argparse.Namespace) -> None:
         max_candidates=args.max_candidates,
         existing_subscriptions=safety.subscription_urls(previous.get(subscribes_file, "")) if revision else None,
         unresolved_sources=unresolved_sources,
-        incremental_state=checkpoint.state if checkpoint is not None and not args.refresh else None,
-        checkpoint=checkpoint if not args.refresh else None,
+        rotation=rotation,
     )
 
     if not tasks and not getattr(args, "public_sources", False):
+        if rotation is not None and rotation.pending:
+            rotation.advance()
+            revision = rotation.persist(gist_id, access_token, previous)
+            logger.warning("Refresh 没有可注册任务，轮换记录已保存，下一次继续新的一批")
         logger.error("cannot found any valid config, exit")
         sys.exit(1)
 
@@ -325,6 +314,11 @@ def aggregate(args: argparse.Namespace) -> None:
         os.remove(generate_conf)
 
     results = pipeline.execute_tasks(tasks)
+    if rotation is not None and rotation.pending:
+        rotation.advance()
+        revision = rotation.persist(gist_id, access_token, previous)
+        previous["refresh-rotation.json"] = rotation.encode()
+        logger.info(f"Refresh 轮换记录已保存：本周期已处理={len(rotation.done)} 个机场")
     proxies = list(itertools.chain.from_iterable([x[1] for x in results if x]))
     # Reviewable public Clash feeds complement airport registration and are
     # reloaded on BOTH Collect and Refresh. Never persist them as private
@@ -337,12 +331,8 @@ def aggregate(args: argparse.Namespace) -> None:
     # Last published, flag-confirmed nodes remain available as *candidates*
     # for new real HTTP and egress checks even if a source times out today.
     # They receive NO automatic pass and are not written back unless verified.
-    if getattr(args, "geo_rename", False):
-        from node_history import previous_confirmed_candidates
-        historical = previous_confirmed_candidates(previous.get("clash.yaml", ""))
-        if historical:
-            proxies.extend(historical)
-            logger.info(f"历史节点：加入复测候选={len(historical)}；不会免检发布")
+    # Do not republish expired nodes merely because they were in an old Gist.
+    # The upstream collector must fetch them from currently valid subscriptions.
     proxies = safety.valid_nodes(proxies)
 
     if len(proxies) == 0:
@@ -409,46 +399,27 @@ def aggregate(args: argparse.Namespace) -> None:
         logger.info(f"advisory TCP sample: checked={len(checks)}, reachable={checks.count('reachable')}, "
                     f"unknown={checks.count('unknown')}, skipped={checks.count('skipped')}; no nodes removed")
 
-    # Label only after final node selection: never change collection or liveness decisions.
+    # ONE egress-country lookup only AFTER original Clash liveness testing.
+    # No second HTTPS health check, no recursive Mihomo retry, no fake flags.
     if getattr(args, "geo_rename", False):
-        from node_labels import relabel_and_sort
-
-        original_types = [p.get('type', 'unknown') for p in nodes if isinstance(p, dict)]
+        from node_labels import relabel_and_sort, only_confirmed
+        from light_geo import locate_once
+        original_types = [str(p.get("type", "unknown")) for p in nodes]
         nodes, geo_stats = relabel_and_sort(
-            nodes,
-            previous_clash=previous.get("clash.yaml", ""),
-            num_threads=min(max(1, args.num), 24),
-            chunk_size=55,
-            retry_unknown=True,
+            nodes, previous_clash=previous.get("clash.yaml", ""),
+            num_threads=min(max(1, args.num), 24), chunk_size=32,
+            query_func=locate_once, retry_unknown=False,
         )
-        logger.info(
-            f"地区整理：总数={geo_stats['total']}，出口新确认={geo_stats['fresh']}，"
-            f"沿用历史地区={geo_stats['historical']}，未知={geo_stats['unknown']}；筛除未知地区"
-        )
-        logger.info(f"真实代理连通性：验证通过={geo_stats.get('live', 0)}，"
-                    f"未确认或未完成={geo_stats.get('not_live', 0)}，"
-                    f"二轮补回地区={geo_stats.get('recovered', 0)}；仅代表GitHub云端")
-        logger.info(f"Mihomo批次隔离：尝试={geo_stats.get('batch_attempts', 0)}，"
-                    f"拆分={geo_stats.get('isolated_splits', 0)}，"
-                    f"始终未能执行节点级检测={geo_stats.get('unprobed', 0)}，"
-                    f"已连通但未定位={geo_stats.get('connected_no_geo', 0)}")
-        if checkpoint is not None:
-            from node_labels import identity, LABEL_RE
-            checkpoint.state.mark_nodes(nodes, identity=identity,
-                                        verified_label=lambda p: bool(LABEL_RE.fullmatch(str(p.get("name", "")))))
-            checkpoint.save()  # Save independently from conversion/publication.
-            logger.info(f"节点状态断点已保存：记录={len(checkpoint.state.nodes)}")
-        from node_labels import only_confirmed
         nodes, removed_unknown = only_confirmed(nodes)
-        logger.info(f"地区筛选：保留={len(nodes)}，剔除未知={removed_unknown}")
+        for item in nodes:
+            item.pop("_verified_http", None)  # internal test marker, not Clash syntax
+        logger.info(f"地区整理：连通通过后查询={geo_stats['total']}，新确认={geo_stats['fresh']}，"
+                    f"历史地区复用={geo_stats['historical']}，未知剔除={removed_unknown}；重新编号排序")
         from egress_region import format_protocol_summary
         logger.info("地区筛选按协议：" + format_protocol_summary(
-            original_types, [p.get('type', 'unknown') for p in nodes if isinstance(p, dict)]
+            original_types, [str(p.get('type', 'unknown')) for p in nodes]
         ))
         if not nodes:
-            if checkpoint is not None:
-                logger.warning("本轮无可确认地区的节点；未发布订阅，扫描进度已经保存")
-                return
             raise safety.PublicationError("no region-confirmed nodes; keeping previous Gist publication")
 
     subscriptions = set(fetched_subscriptions) if args.skip else set()
@@ -575,15 +546,8 @@ def aggregate(args: argparse.Namespace) -> None:
 
         logger.info(f"filter subscriptions finished, total: {total}, found: {len(urls)}, discard: {discard}")
 
-    try:
-        safety.check_publication(artifacts, previous, urls, allow_public_only=bool(
-            getattr(args, "public_sources", False) and nodes))
-    except safety.PublicationError as exc:
-        if checkpoint is not None and (str(exc).startswith("node count dropped") or
-                                       str(exc).startswith("too many previous sources")):
-            logger.warning(f"本轮安全保护：{exc}；保留旧订阅，已保存扫描和节点状态")
-            return
-        raise
+    safety.check_publication(artifacts, previous, urls, allow_public_only=bool(
+        getattr(args, "public_sources", False) and nodes))
     if unresolved_sources and previous.get("clash.yaml"):
         # An intermittent historical source must never cause a node-count
         # decrease to replace the last known-good publication. Discovery and
@@ -592,10 +556,6 @@ def aggregate(args: argparse.Namespace) -> None:
         # failures; the ordinary 50% threshold remains for all other runs.
         old_count = safety.artifact_count(previous["clash.yaml"], "clash")
         if len(nodes) < old_count:
-            if checkpoint is not None:
-                logger.warning(f"本轮安全保护：{len(unresolved_sources)} 条历史订阅暂不可达，"
-                               f"节点数 {old_count} -> {len(nodes)}；旧订阅不覆盖，扫描进度已保存")
-                return
             raise safety.PublicationError(
                 f"{len(unresolved_sources)} historical source(s) temporarily unreachable; "
                 f"retaining previous Gist because node count would fall "
@@ -610,15 +570,16 @@ def aggregate(args: argparse.Namespace) -> None:
 
         if urls:
             files[subscribes_file] = {"content": "\n".join(urls), "filename": subscribes_file}
-
         if files:
-            current_revision, _ = safety.read_gist(gist_id, access_token)
-            if checkpoint is not None:
-                checkpoint.assert_unchanged_publication()
-                # Our own checkpoint PATCH operations update Gist's revision.
-                # Compare published files, never reject our own state writes.
-            elif current_revision != revision:
-                raise safety.PublicationError("gist changed during collection; keeping newer publication")
+            current_revision, current_files = safety.read_gist(gist_id, access_token)
+            if current_revision != revision:
+                # Metadata-only Refresh updates are not publication conflicts.
+                # Use the same Gist snapshot; avoid a redundant network request.
+                def public_only(files):
+                    return {k: v for k, v in files.items()
+                            if k not in {"refresh-rotation.json", "collector-state.json"}}
+                if public_only(current_files) != public_only(previous):
+                    raise safety.PublicationError("gist publication changed during collection; keeping newer version")
             push_client = push.PushToGist(token=access_token)
 
             # 上传
@@ -784,7 +745,7 @@ if __name__ == "__main__":
         dest="refresh",
         action="store_true",
         default=False,
-        help="refresh and remove expired proxies with existing subscriptions",
+        help="refresh old subscriptions and rotate newly discovered airports",
     )
 
     parser.add_argument(
@@ -837,14 +798,12 @@ if __name__ == "__main__":
         help='collect additional reviewed public YAML feeds on Collect/Refresh',
     )
 
-    parser.add_argument("--incremental", action="store_true",
-                        help="persistent full-discovery incremental Collect/Refresh with Gist checkpoints")
     parser.add_argument("--geo-rename", action="store_true", help="identify egress location and sort nodes")
     parser.add_argument("--max-candidates", type=int, default=100, help="maximum new airports per collection")
     parser.add_argument("--probe-sample", type=int, default=0, help="advisory public TCP endpoint sample; never removes nodes")
     args = parser.parse_args()
-    if args.max_candidates < 1 or args.probe_sample < 0:
-        parser.error("max-candidates must be positive and probe-sample must be nonnegative")
+    if args.max_candidates < 0 or args.probe_sample < 0:
+        parser.error("max-candidates must be nonnegative (0 means full collection)")
     try:
         aggregate(args=args)
     except safety.PublicationError as exc:

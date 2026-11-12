@@ -1,67 +1,100 @@
 name: Collect
 on:
-  # Every Monday at 08:00 Asia/Shanghai (GitHub schedule cron uses UTC)
+  # Every Monday at 08:00 Beijing time, GitHub cron is UTC.
   schedule:
     - cron: "0 0 * * 1"
   workflow_dispatch:
 
-# Share the queue with Refresh, without killing an active run.
+# Collection and Refresh can collect independently; Gist revision checking
+# prevents a stale run overwriting a newer publication.
 concurrency:
-  group: ${{ github.repository }}
+  group: collect-${{ github.repository }}
   cancel-in-progress: false
 
 permissions:
   contents: read
 
-env:
-  TZ: Asia/Shanghai
-  GIST_PAT: ${{ secrets.GIST_PAT }}
-  GIST_LINK: ${{ secrets.GIST_LINK }}
-  CUSTOMIZE_LINK: ${{ secrets.CUSTOMIZE_LINK }}
-  ENABLE_SPECIAL_PROTOCOLS: ${{ vars.ENABLE_SPECIAL_PROTOCOLS }}
-
 jobs:
-  process:
+  upstream:
     runs-on: ubuntu-latest
-    timeout-minutes: 330
+    timeout-minutes: 30
+    permissions:
+      contents: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Check and safely merge upstream when verified
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          BASE=$(git rev-parse HEAD)
+          if ! git fetch --no-tags https://github.com/wzdnzd/aggregator.git refs/heads/main; then
+            echo "上游暂不可达，继续使用当前版本" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          UPSTREAM=$(git rev-parse FETCH_HEAD)
+          if git merge-base --is-ancestor "$UPSTREAM" "$BASE"; then
+            echo "上游没有新提交" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if ! git merge --no-commit --no-ff "$UPSTREAM"; then
+            git merge --abort || true
+            echo "上游代码存在冲突，未自动合并，不阻止本周 Collect" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if git diff --cached --name-only "$BASE" | grep -Eq '^\.github/workflows/'; then
+            git merge --abort || true
+            echo "上游更改工作流，需要人工审查，跳过自动合并" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if ! (python -m pip install -r requirements.txt && python -m compileall -q subscribe tests && python -m unittest discover -s tests -q); then
+            git merge --abort || true
+            echo "上游合并版本测试未通过，保留稳定代码" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git commit -m "Merge upstream after regression tests"
+          git fetch origin main
+          if [ "$(git rev-parse origin/main)" != "$BASE" ]; then
+            echo "合并验证期间主分支已更新，本轮不推送" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git push origin HEAD:main
+          echo "上游代码已合并，通过测试并推送至 main" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Prepare
-        uses: actions/setup-python@v5
+  process:
+    needs: upstream
+    if: ${{ always() && needs.upstream.result != 'cancelled' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      TZ: Asia/Shanghai
+      GIST_PAT: ${{ secrets.GIST_PAT }}
+      GIST_LINK: ${{ secrets.GIST_LINK }}
+      CUSTOMIZE_LINK: ${{ secrets.CUSTOMIZE_LINK }}
+      ENABLE_SPECIAL_PROTOCOLS: ${{ vars.ENABLE_SPECIAL_PROTOCOLS }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
-          architecture: "x64"
-          cache: "pip"
-
-      - name: Install
-        run: pip3 install -r requirements.txt
-
-      - name: Check
+          architecture: x64
+          cache: pip
+      - run: pip3 install -r requirements.txt
+      - name: Validate Gist credentials
+        shell: bash
         run: |
-          if [ -z "$GIST_PAT" ]; then
-              echo "Error: environment 'GIST_PAT' cannot be empty"
-              exit 1
-          fi
-          if [ -z "$GIST_LINK" ]; then
-              echo "Error: environment 'GIST_LINK' cannot be empty"
-              exit 1
-          fi
-          LINK_PARTS=$(echo "$GIST_LINK" | awk -F'/' 'NF==2 && $1!="" && $2!=""')
-          if [ -z "$LINK_PARTS" ]; then
-              echo "Error: environment 'GIST_LINK' is not valid, should be 'username/gist_id' format"
-              exit 1
-          fi
-
-      - name: Collect
-        # Full discovery across all configured sources (500 Telegram pages).
-        # Durable per-batch checkpoints; prioritize never-probed sites.
-        # Skip CAPTCHA-only airports to reduce futile registrations.
-        # Structural validation is mandatory; TCP sampling is advisory, not a deletion rule.
-        run: python -u subscribe/collect.py --all --overwrite --skip --pages 500 --skip-captcha --max-candidates 9000 --probe-sample 50 --public-sources --incremental --geo-rename -t clash v2ray singbox surge
-
-      - name: Timestamp
-        run: date
+          test -n "$GIST_PAT" && test -n "$GIST_LINK"
+          [[ "$GIST_LINK" =~ ^[^/]+/[^/]+$ ]]
+      - name: Collect full discovery with upstream check, single country lookup and sorted labels
+        run: python -u subscribe/collect.py --all --overwrite --pages 500 --skip-captcha --max-candidates 0 --geo-rename -t clash v2ray singbox surge
+      - run: date

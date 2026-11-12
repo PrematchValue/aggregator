@@ -162,8 +162,11 @@ def relabel_and_sort(
                 live_by_id[key] = True
                 probed_ids.add(key)
 
+    from logger import logger
     for offset in range(0, len(items), step):
         check_batch(items[offset:offset + step])
+        logger.info(f"节点地区查询进度：{min(offset + step, len(items))}/{len(items)}，"
+                    f"已确认地区={len(discovered)}")
 
     first_count = len(discovered)
     if retry_unknown:

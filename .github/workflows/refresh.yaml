@@ -1,13 +1,12 @@
 name: Refresh
 on:
-  # Every 2 hours (UTC cron; schedule is unchanged from upstream)
   schedule:
     - cron: "0 */2 * * *"
   workflow_dispatch:
 
-# Wait behind Collect instead of cancelling it.
+# Refresh must not wait behind a weekly full Collect run.
 concurrency:
-  group: ${{ github.repository }}
+  group: refresh-${{ github.repository }}
   cancel-in-progress: false
 
 permissions:
@@ -25,40 +24,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 110
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: main
-
-      - name: Prepare
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
-          architecture: "x64"
-          cache: "pip"
-
-      - name: Install
-        run: pip3 install -r requirements.txt
-
-      - name: Check
+          architecture: x64
+          cache: pip
+      - run: pip3 install -r requirements.txt
+      - name: Validate Gist credentials
+        shell: bash
         run: |
-          if [ -z "$GIST_PAT" ]; then
-              echo "Error: environment 'GIST_PAT' cannot be empty"
-              exit 1
-          fi
-          if [ -z "$GIST_LINK" ]; then
-              echo "Error: environment 'GIST_LINK' cannot be empty"
-              exit 1
-          fi
-          LINK_PARTS=$(echo "$GIST_LINK" | awk -F'/' 'NF==2 && $1!="" && $2!=""')
-          if [ -z "$LINK_PARTS" ]; then
-              echo "Error: environment 'GIST_LINK' is not valid, should be 'username/gist_id' format"
-              exit 1
-          fi
-
-      - name: Refresh
-        # Refresh existing subscriptions; don't republish with Github-only liveness tests.
-        run: python -u subscribe/collect.py --all --refresh --skip --probe-sample 50 --public-sources --incremental --geo-rename -t clash v2ray singbox surge
-
-      - name: Timestamp
-        run: date
+          test -n "$GIST_PAT" && test -n "$GIST_LINK"
+          [[ "$GIST_LINK" =~ ^[^/]+/[^/]+$ ]]
+      - name: Refresh full discovery, rotate 2000 airports, maintain subscriptions
+        run: python -u subscribe/collect.py --all --overwrite --refresh --pages 500 --skip-captcha --max-candidates 2000 --geo-rename -t clash v2ray singbox surge
+      - run: date

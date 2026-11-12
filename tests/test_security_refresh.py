@@ -42,6 +42,12 @@ class SubscriptionHeaderTests(unittest.TestCase):
 
 
 class RefreshSourceTests(unittest.TestCase):
+    def setUp(self):
+        # Refresh now discovers each run, but unit tests must stay offline.
+        mocker = patch("collect.collect_airport", return_value={})
+        mocker.start()
+        self.addCleanup(mocker.stop)
+
     @patch("collect.check_status", return_value=(False, False))
     def test_transient_failure_preserves_source_for_retry(self, check):
         with tempfile.TemporaryDirectory() as work, patch.object(collect, "DATA_BASE", work):

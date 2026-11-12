@@ -108,24 +108,24 @@ class AssignmentTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    @patch("collect.collect_airport")
+    @patch("collect.collect_airport", return_value={})
     @patch("collect.check_status", return_value=(False, False))
-    def test_refresh_empty_never_discovers(self, status, discover):
+    def test_refresh_always_discovers_even_without_subscriptions(self, status, discover):
         self.assertEqual(collect.assign("converter", refresh=True, overwrite=True,
                                         subscribes_file="subscribes.txt", existing_subscriptions=set()), [])
         tasks = collect.assign("converter", refresh=True, overwrite=True,
                                subscribes_file="subscribes.txt",
                                existing_subscriptions={"https://source.example/sub"})
-        self.assertEqual(len(tasks), 1)  # Unresolved is retryable, not expired.
-        discover.assert_not_called()
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(discover.call_count, 2)
 
-    @patch("collect.collect_airport")
+    @patch("collect.collect_airport", return_value={})
     @patch("collect.check_status", return_value=(True, False))
-    def test_refresh_preserves_existing_task(self, status, discover):
+    def test_refresh_keeps_old_subscription_and_discovers(self, status, discover):
         tasks = collect.assign("converter", refresh=True, subscribes_file="subscribes.txt",
                                existing_subscriptions={"https://source.example/sub"})
         self.assertEqual(len(tasks), 1)
-        discover.assert_not_called()
+        discover.assert_called_once()
 
     def test_candidate_budget_deduplicates_and_excludes(self):
         domains = ["https://known.example", "http://known.example", "https://one.example", "https://two.example"]
@@ -160,7 +160,7 @@ class AggregateTests(unittest.TestCase):
         (root / "subconverter").mkdir()
         (root / "data").mkdir()
         self.args = argparse.Namespace(invisible=True, key="test-token", gist="user/aabbcc", overwrite=False,
-            pages=1, easygoing=False, num=2, refresh=True, skip_captcha=True, custom_sites="",
+            pages=1, easygoing=False, num=2, refresh=False, skip_captcha=True, custom_sites="",
             max_candidates=3, skip=True, probe_sample=0, targets=["clash", "v2ray", "singbox", "surge"],
             all=True, ignore_default_filters=False, life=0, flow=0)
         self.files = {"clash.yaml": artifact(4), "subscribes.txt": "https://source.example/sub"}
@@ -335,10 +335,18 @@ class AggregateTests(unittest.TestCase):
         self.assert_no_publish()
 
     def test_changed_gist_blocks_publish(self):
-        self.mocks["safety.read_gist"].side_effect = [("v1", self.files), ("v2", self.files)]
+        self.mocks["safety.read_gist"].side_effect = [("v1", self.files), ("v2", {**self.files, "clash.yaml": artifact(5)})]
         with self.assertRaises(safety.PublicationError):
             collect.aggregate(self.args)
         self.assert_no_publish()
+
+    def test_refresh_metadata_revision_allows_publishing(self):
+        self.mocks["safety.read_gist"].side_effect = [
+            ("v1", self.files),
+            ("v2", {**self.files, "refresh-rotation.json": '{"v":1,"cycle":0,"done":[]}'})
+        ]
+        collect.aggregate(self.args)
+        self.mocks["push.PushToGist"].return_value.push_to.assert_called_once()
 
     def test_large_drop_blocks_publish(self):
         self.files["clash.yaml"] = artifact(20)
