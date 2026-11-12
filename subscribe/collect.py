@@ -409,7 +409,7 @@ def aggregate(args: argparse.Namespace) -> None:
         output = os.path.join(PATH, "subconverter", t[1])
         if os.path.isfile(output):
             os.remove(output)
-        success = subconverter.generate_conf(generate_conf, t[0], source, t[1], t[2], not getattr(args, 'geo_rename', False), t[3], t[4])
+        success = subconverter.generate_conf(generate_conf, t[0], source, t[1], t[2], None if getattr(args, 'geo_rename', False) else True, t[3], t[4])
         if not success:
             raise safety.PublicationError(f"cannot generate conversion config: {t[2]}")
 

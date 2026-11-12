@@ -40,7 +40,7 @@ def generate_conf(
     source: str,
     dest: str,
     target: str,
-    emoji: bool = True,
+    emoji: bool | None = True,
     list_only: bool = True,
     ignore_exclude: bool = True,
 ) -> None:
@@ -79,7 +79,11 @@ def generate_conf(
         else:
             lines.append("list=false")
 
-        if emoji:
+        if emoji is None:
+            # Egress-country naming already supplied the precise flag and order.
+            # SubConverter emoji=false would STRIP those flags. Keep them verbatim.
+            lines.extend(["add_emoji=false", "remove_emoji=false"])
+        elif emoji:
             lines.extend(["emoji=true", "add_emoji=true"])
         else:
             lines.extend(["emoji=false", "add_emoji=false"])
