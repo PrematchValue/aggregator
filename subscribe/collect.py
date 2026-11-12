@@ -548,20 +548,6 @@ def aggregate(args: argparse.Namespace) -> None:
 
     safety.check_publication(artifacts, previous, urls, allow_public_only=bool(
         getattr(args, "public_sources", False) and nodes))
-    if unresolved_sources and previous.get("clash.yaml"):
-        # An intermittent historical source must never cause a node-count
-        # decrease to replace the last known-good publication. Discovery and
-        # conversion still run, so new nodes can be published once they offset
-        # the missing source. The stronger guard applies only to transient
-        # failures; the ordinary 50% threshold remains for all other runs.
-        old_count = safety.artifact_count(previous["clash.yaml"], "clash")
-        if len(nodes) < old_count:
-            raise safety.PublicationError(
-                f"{len(unresolved_sources)} historical source(s) temporarily unreachable; "
-                f"retaining previous Gist because node count would fall "
-                f"({old_count} -> {len(nodes)})"
-            )
-
     # 如有必要，上传至 Gist
     if gist_id and access_token:
         item = StorageItem(gist_id=gist_id, filename=list(records.keys())[0])

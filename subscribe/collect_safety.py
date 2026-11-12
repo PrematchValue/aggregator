@@ -127,18 +127,16 @@ def artifact_count(content, target):
         raise PublicationError(f"invalid or empty converted artifact: {target}") from None
 
 
-def check_publication(artifacts, previous, urls, ratio=0.5, *, allow_public_only=False):
+def check_publication(artifacts, previous, urls, *, allow_public_only=False):
+    """Only validate publishing prerequisites and artifact integrity.
+
+    Deliberately do not compare with old source or node counts: every Collect
+    and Refresh publishes the nodes that actually passed the current checks.
+    """
     if not urls and not allow_public_only:
-        raise PublicationError("no successful source subscriptions; keeping previous publication")
-    old_urls = subscription_urls(previous.get("subscribes.txt", ""))
-    if old_urls and len(old_urls & set(urls)) < len(old_urls) * ratio:
-        raise PublicationError("too many previous sources failed; keeping previous publication")
-    for filename, (target, content) in artifacts.items():
-        count = artifact_count(content, target)
-        if previous.get(filename):
-            old_count = artifact_count(previous[filename], target)
-            if count < old_count * ratio:
-                raise PublicationError(f"node count dropped by more than 50%: {target}; keeping previous publication")
+        raise PublicationError("no successful source subscriptions; cannot publish")
+    for _, (target, content) in artifacts.items():
+        artifact_count(content, target)
 
 
 def tcp_probe(node):

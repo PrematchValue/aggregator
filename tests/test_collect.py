@@ -47,16 +47,13 @@ class SafetyTests(unittest.TestCase):
             with self.subTest(target=target, content=content), self.assertRaises(safety.PublicationError):
                 safety.artifact_count(content, target)
 
-    def test_drop_guard_boundary(self):
-        previous = {"clash.yaml": artifact(4)}
-        safety.check_publication({"clash.yaml": ("clash", artifact(2))}, previous, {"https://a.example/sub"})
-        with self.assertRaises(safety.PublicationError):
-            safety.check_publication({"clash.yaml": ("clash", artifact(1))}, previous, {"https://a.example/sub"})
+    def test_node_count_can_drop_without_blocking_publication(self):
+        previous = {"clash.yaml": artifact(40)}
+        safety.check_publication({"clash.yaml": ("clash", artifact(1))}, previous, {"https://a.example/sub"})
 
-    def test_new_sources_cannot_hide_old_source_loss(self):
+    def test_old_source_count_can_drop_without_blocking_publication(self):
         previous = {"subscribes.txt": "https://a.example/sub\nhttps://b.example/sub"}
-        with self.assertRaises(safety.PublicationError):
-            safety.check_publication({"clash.yaml": ("clash", artifact())}, previous, {"https://new.example/sub"})
+        safety.check_publication({"clash.yaml": ("clash", artifact())}, previous, {"https://new.example/sub"})
 
     def test_empty_sources_rejected(self):
         with self.assertRaises(safety.PublicationError):
@@ -228,16 +225,15 @@ class AggregateTests(unittest.TestCase):
         payload = self.mocks["push.PushToGist"].return_value.push_to.call_args.kwargs["payload"]
         self.assertEqual(set(payload["files"]["subscribes.txt"]["content"].splitlines()), set(urls))
 
-    def test_unresolved_source_blocks_shrinking_gist_not_collection(self):
+    def test_temporary_source_failure_does_not_block_smaller_publication(self):
         original = self.mocks["assign"].return_value
         def unresolved_assign(**kwargs):
             kwargs["unresolved_sources"].add("https://source.example/sub")
             return original
         self.mocks["assign"].side_effect = unresolved_assign
         self.mocks["pipeline.execute_tasks"].return_value = [(1, [node(i) for i in range(3)])]
-        with self.assertRaisesRegex(safety.PublicationError, "temporarily unreachable"):
-            collect.aggregate(self.args)
-        self.assert_no_publish()
+        collect.aggregate(self.args)
+        self.mocks["push.PushToGist"].return_value.push_to.assert_called_once()
 
     @patch("collect.safety.tcp_probe", return_value="unknown")
     def test_advisory_failure_does_not_remove_nodes(self, probe):
@@ -348,11 +344,10 @@ class AggregateTests(unittest.TestCase):
         collect.aggregate(self.args)
         self.mocks["push.PushToGist"].return_value.push_to.assert_called_once()
 
-    def test_large_drop_blocks_publish(self):
+    def test_large_drop_publishes_current_verified_nodes(self):
         self.files["clash.yaml"] = artifact(20)
-        with self.assertRaises(safety.PublicationError):
-            collect.aggregate(self.args)
-        self.assert_no_publish()
+        collect.aggregate(self.args)
+        self.mocks["push.PushToGist"].return_value.push_to.assert_called_once()
 
     def test_upload_failure_keeps_local_subscription(self):
         local = self.root / "data" / "subscribes.txt"
