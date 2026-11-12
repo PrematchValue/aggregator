@@ -108,23 +108,42 @@ def relabel_and_sort(
 
     old = _history(previous_clash, countries)
     items = [copy.deepcopy(proxy) for proxy in proxies]
+    # Never accept runtime health markers supplied by a remote feed.
+    for item in items:
+        item.pop('_verified_http', None)
     ids = [identity(p) for p in items]
     discovered: dict[str, str] = {}
     checked = set()
     live_by_id: dict[str, bool] = {}
     step = max(1, min(120, int(chunk_size)))
 
+    # Successful per-node requests set _verified_http, even when False.
+    # If *no* node has that marker, Mihomo may have rejected one config and
+    # never started. Divide recursively down to a singleton instead of
+    # misclassifying a whole group as unreachable.
+    probed_ids: set[str] = set()
+    batch_attempts = 0
+    isolated_splits = 0
+
     def check_batch(batch: list[dict]) -> None:
-        # Mihomo creates per-node listeners, and may normalize names on its
-        # private copies. Never modify source connection parameters.
-        try:
-            queried = batch_query(
-                proxies=copy.deepcopy(batch), func=query_func,
-                num_threads=max(1, min(32, num_threads)), show_progress=False,
-                description="Checking egress regions and HTTPS", digits=4,
-            ) or []
-        except Exception:
-            queried = []
+        nonlocal batch_attempts, isolated_splits
+        def run_subset(subset: list[dict]) -> list:
+            try:
+                return batch_query(
+                    proxies=copy.deepcopy(subset), func=query_func,
+                    num_threads=max(1, min(32, num_threads)), show_progress=False,
+                    description="Checking HTTPS and egress regions", digits=4,
+                ) or []
+            except Exception:
+                return []
+
+        if retry_unknown:
+            from batch_isolation import inspect_with_isolation
+            queried, metrics, _ = inspect_with_isolation(batch, run_subset, identity)
+            batch_attempts += metrics["attempts"]
+            isolated_splits += metrics["splits"]
+        else:
+            queried = run_subset(batch)
         for entry in queried:
             candidate = getattr(entry, "proxy", None)
             info = getattr(entry, "result", None)
@@ -132,6 +151,7 @@ def relabel_and_sort(
                 continue
             key = identity(candidate)
             if "_verified_http" in candidate:
+                probed_ids.add(key)
                 live_by_id[key] = live_by_id.get(key, False) or bool(candidate["_verified_http"])
             if not getattr(entry, "success", False) or info is None or getattr(info, "is_cdn", False):
                 continue
@@ -139,35 +159,8 @@ def relabel_and_sort(
             if code != UNKNOWN:
                 discovered[key] = code
                 checked.add(key)
-                live_by_id[key] = True  # A successful HTTPS geolocation is real HTTP.
-        # An invalid config can make an entire Mihomo batch fail. One bounded
-        # bisect avoids letting a single unsupported proxy discard its peers.
-        if retry_unknown and len(batch) > 20 and not any(
-            isinstance(getattr(entry, "proxy", None), dict)
-            and "_verified_http" in entry.proxy for entry in queried
-        ):
-            midpoint = len(batch) // 2
-            for part in (batch[:midpoint], batch[midpoint:]):
-                try:
-                    extra = batch_query(proxies=copy.deepcopy(part), func=query_func,
-                        num_threads=max(1, min(32, num_threads)), show_progress=False,
-                        description="Retry split listener batch", digits=4) or []
-                except Exception:
-                    extra = []
-                for entry in extra:
-                    candidate = getattr(entry, "proxy", None)
-                    info = getattr(entry, "result", None)
-                    if not isinstance(candidate, dict):
-                        continue
-                    key = identity(candidate)
-                    if "_verified_http" in candidate:
-                        live_by_id[key] = live_by_id.get(key, False) or bool(candidate["_verified_http"])
-                    if getattr(entry, "success", False) and info is not None and not getattr(info, "is_cdn", False):
-                        code = _map_region(getattr(info, "country", ""), countries)
-                        if code != UNKNOWN:
-                            discovered[key] = code
-                            checked.add(key)
-                            live_by_id[key] = True
+                live_by_id[key] = True
+                probed_ids.add(key)
 
     for offset in range(0, len(items), step):
         check_batch(items[offset:offset + step])
@@ -211,7 +204,11 @@ def relabel_and_sort(
     if retry_unknown:
         counts.update({"live": sum(bool(x) for x in live_by_id.values()),
                        "not_live": len(ids) - sum(bool(live_by_id.get(k, False)) for k in ids),
-                       "recovered": len(discovered) - first_count})
+                       "recovered": len(discovered) - first_count,
+                       "unprobed": sum(k not in probed_ids for k in ids),
+                       "isolated_splits": isolated_splits,
+                       "batch_attempts": batch_attempts,
+                       "connected_no_geo": sum(bool(live_by_id.get(k, False)) and k not in discovered for k in ids)})
     return results, counts
 
 

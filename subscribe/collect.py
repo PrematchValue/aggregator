@@ -307,6 +307,15 @@ def aggregate(args: argparse.Namespace) -> None:
         public_nodes, public_counts = gather_public_nodes(logger=logger)
         logger.info(f"公开节点：新增候选={len(public_nodes)}，成功读取源={sum(n > 0 for n in public_counts.values())}")
         proxies.extend(public_nodes)
+    # Last published, flag-confirmed nodes remain available as *candidates*
+    # for new real HTTP and egress checks even if a source times out today.
+    # They receive NO automatic pass and are not written back unless verified.
+    if getattr(args, "geo_rename", False):
+        from node_history import previous_confirmed_candidates
+        historical = previous_confirmed_candidates(previous.get("clash.yaml", ""))
+        if historical:
+            proxies.extend(historical)
+            logger.info(f"历史节点：加入复测候选={len(historical)}；不会免检发布")
     proxies = safety.valid_nodes(proxies)
 
     if len(proxies) == 0:
@@ -390,8 +399,12 @@ def aggregate(args: argparse.Namespace) -> None:
             f"沿用历史地区={geo_stats['historical']}，未知={geo_stats['unknown']}；筛除未知地区"
         )
         logger.info(f"真实代理连通性：验证通过={geo_stats.get('live', 0)}，"
-                    f"验证失败或不确定={geo_stats.get('not_live', 0)}，"
+                    f"未确认或未完成={geo_stats.get('not_live', 0)}，"
                     f"二轮补回地区={geo_stats.get('recovered', 0)}；仅代表GitHub云端")
+        logger.info(f"Mihomo批次隔离：尝试={geo_stats.get('batch_attempts', 0)}，"
+                    f"拆分={geo_stats.get('isolated_splits', 0)}，"
+                    f"始终未能执行节点级检测={geo_stats.get('unprobed', 0)}，"
+                    f"已连通但未定位={geo_stats.get('connected_no_geo', 0)}")
         from node_labels import only_confirmed
         nodes, removed_unknown = only_confirmed(nodes)
         logger.info(f"地区筛选：保留={len(nodes)}，剔除未知={removed_unknown}")

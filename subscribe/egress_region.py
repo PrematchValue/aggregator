@@ -186,15 +186,15 @@ def locate_with_fallback(proxy: dict, port: int):
     )
     from logger import logger
 
+    # Check independent HTTPS destinations first. A failure does NOT prove
+    # the node dead: geo/IP-echo is a separate fallback using the same node.
+    from node_health import check_http
+    http_ok, http_reason = check_http(port)
     code, source = query_country(
         proxy, port, request=make_proxy_request,
         services=LOCATION_API_SERVICES, countries=ISO_TO_CHINESE,
     )
     country = ISO_TO_CHINESE.get(code, "")
-    # Real per-node HTTPS requests: independent 204 targets, two rounds,
-    # 5s then 9s timeouts. Geo success itself also proves live HTTP.
-    from node_health import check_http
-    http_ok, http_reason = check_http(port)
     proxy["_verified_http"] = bool(http_ok or country)
     if not country:
         logger.warning(

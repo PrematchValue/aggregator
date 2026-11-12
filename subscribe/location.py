@@ -1174,7 +1174,11 @@ def batch_query(
 
         return normalized
     except Exception as e:
-        logger.error(f"Error during mihomo check: {str(e)}")
+        # Do not include the exception text or Mihomo stderr: a bad config
+        # may contain node hostnames/passwords. The caller isolates batches.
+        exit_code = process.poll() if process is not None else None
+        logger.warning(f"Mihomo 批次检查未启动/未完成：数量={len(nodes)}，"
+                       f"退出码={exit_code}，异常类型={type(e).__name__}；等待隔离复测")
         return failed
     finally:
         reservation.close()
