@@ -23,7 +23,7 @@ env:
 jobs:
   process:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 110
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -58,7 +58,7 @@ jobs:
 
       - name: Refresh
         # Refresh existing subscriptions; don't republish with Github-only liveness tests.
-        run: python -u subscribe/collect.py --all --refresh --skip --probe-sample 50 --geo-rename -t clash v2ray singbox surge
+        run: python -u subscribe/collect.py --all --refresh --skip --probe-sample 50 --public-sources --geo-rename -t clash v2ray singbox surge
 
       - name: Timestamp
         run: date

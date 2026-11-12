@@ -595,12 +595,11 @@ class AirportCollector:
         self._persist(persisted)
         # Limit expensive backend/registration probes, not just Telegram pages.
         candidates, seen = {}, set(self.options.exclude_hosts)
-        # Select a different deterministic sample on each GitHub run, instead
-        # of rechecking the same first 100 historical records every week.
-        run_id = os.environ.get("GITHUB_RUN_ID")
-        seed = (run_id + ":" + os.environ.get("GITHUB_RUN_ATTEMPT", "1")) if run_id else date.today().strftime("%G-W%V")
-        ordered = sorted(discovered.items(), key=lambda item: hashlib.sha256(
-            (seed + "\x00" + item[0]).encode("utf-8")).digest())
+        # Stable weekly rotating windows cover the entire known catalogue
+        # across runs, instead of resampling the same fraction at random.
+        from candidate_window import window_candidates
+        ordered, (window, windows) = window_candidates(discovered, self.options.max_candidates)
+        logger.info(f"[AirPortCollector] scan window {window + 1}/{windows}, discovery total={len(discovered)}")
         for domain, record in ordered:
             host = utils.extract_domain(domain, False).lower()
             if not host or host in seen:

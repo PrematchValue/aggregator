@@ -19,14 +19,17 @@ import urllib.request
 # Distinct JSON providers through the proxy, with a bounded request budget.
 # Several of them can refuse a given exit IP; don't randomly pick the same
 # unavailable provider three times like the old locate_by_ipinfo did.
-PROXY_GEO_TRIES = 4
-PROXY_TIMEOUT = 8
-ECHO_TIMEOUT = 8
-DIRECT_TIMEOUT = 5
+PROXY_GEO_TRIES = 5
+PROXY_TIMEOUT = 10
+ECHO_TIMEOUT = 10
+DIRECT_TIMEOUT = 6
 ECHO_URLS = (
     "https://www.cloudflare.com/cdn-cgi/trace",
     "https://api.ipify.org",
     "https://ipinfo.io/ip",
+    "https://ipv4.icanhazip.com",
+    "https://api-ipv4.ip.sb/ip",
+    "https://api4.ipify.org",
 )
 DIRECT_GEO_ENDPOINTS = (
     ("https://ipwho.is/", ""),
@@ -188,10 +191,15 @@ def locate_with_fallback(proxy: dict, port: int):
         services=LOCATION_API_SERVICES, countries=ISO_TO_CHINESE,
     )
     country = ISO_TO_CHINESE.get(code, "")
+    # Real per-node HTTPS requests: independent 204 targets, two rounds,
+    # 5s then 9s timeouts. Geo success itself also proves live HTTP.
+    from node_health import check_http
+    http_ok, http_reason = check_http(port)
+    proxy["_verified_http"] = bool(http_ok or country)
     if not country:
         logger.warning(
             f"出口地区未确认：协议={str(proxy.get('type', 'unknown')).lower()}，"
-            f"原因={source}；不按入口 IP 或节点名猜测"
+            f"原因={source}，HTTPS实测={http_reason}；不按入口 IP 或节点名猜测"
         )
     return ProxyQueryResult(
         proxy=proxy,

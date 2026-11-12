@@ -60,7 +60,7 @@ jobs:
         # Look back 300 recent Telegram archive pages rather than the entire history.
         # Skip CAPTCHA-only airports to reduce futile registrations.
         # Structural validation is mandatory; TCP sampling is advisory, not a deletion rule.
-        run: python -u subscribe/collect.py --all --overwrite --skip --pages 300 --skip-captcha --max-candidates 1500 --probe-sample 50 --geo-rename -t clash v2ray singbox surge
+        run: python -u subscribe/collect.py --all --overwrite --skip --pages 500 --skip-captcha --max-candidates 9000 --probe-sample 50 --public-sources --geo-rename -t clash v2ray singbox surge
 
       - name: Timestamp
         run: date

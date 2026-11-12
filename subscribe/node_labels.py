@@ -18,7 +18,7 @@ import yaml
 # Relative priority for familiar regions. Others follow by ISO code; unknown last.
 PRIORITY = ("HK", "TW", "JP", "SG", "KR", "US", "GB", "DE", "FR", "NL", "CA", "AU", "CN")
 UNKNOWN = "ZZ"
-IGNORE_KEYS = {"name", "sub", "liveness", "cdn", "renamed", "delay", "_region"}
+IGNORE_KEYS = {"name", "sub", "liveness", "cdn", "renamed", "delay", "_region", "_verified_http"}
 LABEL_RE = re.compile(r"^(?P<flag>[\U0001f1e6-\U0001f1ff]{2}) (?P<country>.+?) (?P<number>\d{3,})$")
 ALIASES = {
     "中国香港": "HK", "香港特别行政区": "HK", "香港": "HK", "HONG KONG": "HK",
@@ -90,6 +90,7 @@ def _history(previous_clash: str, countries: dict[str, str]) -> dict[str, tuple[
 def relabel_and_sort(
     proxies: list[dict], previous_clash: str = "", num_threads: int = 24, chunk_size: int = 80,
     *, batch_query=None, query_func=None, countries: dict[str, str] | None = None,
+    retry_unknown: bool = False,
 ) -> tuple[list[dict], dict[str, int]]:
     """Use mihomo outbound HTTP requests for egress location; never delete proxies.
 
@@ -110,36 +111,81 @@ def relabel_and_sort(
     ids = [identity(p) for p in items]
     discovered: dict[str, str] = {}
     checked = set()
+    live_by_id: dict[str, bool] = {}
     step = max(1, min(120, int(chunk_size)))
-    for offset in range(0, len(items), step):
-        # Batch query renames its OWN copies; original nodes and credentials survive.
-        subset = copy.deepcopy(items[offset:offset + step])
+
+    def check_batch(batch: list[dict]) -> None:
+        # Mihomo creates per-node listeners, and may normalize names on its
+        # private copies. Never modify source connection parameters.
         try:
             queried = batch_query(
-                proxies=subset, func=query_func, num_threads=max(1, min(32, num_threads)),
-                show_progress=False, description="Checking egress regions", digits=4,
-            )
+                proxies=copy.deepcopy(batch), func=query_func,
+                num_threads=max(1, min(32, num_threads)), show_progress=False,
+                description="Checking egress regions and HTTPS", digits=4,
+            ) or []
         except Exception:
             queried = []
-        for item in queried or []:
-            if not item or not getattr(item, "success", False):
+        for entry in queried:
+            candidate = getattr(entry, "proxy", None)
+            info = getattr(entry, "result", None)
+            if not isinstance(candidate, dict):
                 continue
-            candidate = getattr(item, "proxy", None)
-            info = getattr(item, "result", None)
-            if not isinstance(candidate, dict) or info is None or getattr(info, "is_cdn", False):
+            key = identity(candidate)
+            if "_verified_http" in candidate:
+                live_by_id[key] = live_by_id.get(key, False) or bool(candidate["_verified_http"])
+            if not getattr(entry, "success", False) or info is None or getattr(info, "is_cdn", False):
                 continue
             code = _map_region(getattr(info, "country", ""), countries)
             if code != UNKNOWN:
-                key = identity(candidate)
                 discovered[key] = code
                 checked.add(key)
+                live_by_id[key] = True  # A successful HTTPS geolocation is real HTTP.
+        # An invalid config can make an entire Mihomo batch fail. One bounded
+        # bisect avoids letting a single unsupported proxy discard its peers.
+        if retry_unknown and len(batch) > 20 and not any(
+            isinstance(getattr(entry, "proxy", None), dict)
+            and "_verified_http" in entry.proxy for entry in queried
+        ):
+            midpoint = len(batch) // 2
+            for part in (batch[:midpoint], batch[midpoint:]):
+                try:
+                    extra = batch_query(proxies=copy.deepcopy(part), func=query_func,
+                        num_threads=max(1, min(32, num_threads)), show_progress=False,
+                        description="Retry split listener batch", digits=4) or []
+                except Exception:
+                    extra = []
+                for entry in extra:
+                    candidate = getattr(entry, "proxy", None)
+                    info = getattr(entry, "result", None)
+                    if not isinstance(candidate, dict):
+                        continue
+                    key = identity(candidate)
+                    if "_verified_http" in candidate:
+                        live_by_id[key] = live_by_id.get(key, False) or bool(candidate["_verified_http"])
+                    if getattr(entry, "success", False) and info is not None and not getattr(info, "is_cdn", False):
+                        code = _map_region(getattr(info, "country", ""), countries)
+                        if code != UNKNOWN:
+                            discovered[key] = code
+                            checked.add(key)
+                            live_by_id[key] = True
+
+    for offset in range(0, len(items), step):
+        check_batch(items[offset:offset + step])
+
+    first_count = len(discovered)
+    if retry_unknown:
+        # Second complete pass only for nodes still without an actual egress
+        # location. The second pass may use a different live proxy path/result.
+        pending = [p for p, key in zip(items, ids) if key not in discovered]
+        for offset in range(0, len(pending), step):
+            check_batch(pending[offset:offset + step])
 
     groups = defaultdict(list)
     cached = 0
     for i, proxy in enumerate(items):
         key = ids[i]
         country = discovered.get(key, UNKNOWN)
-        if country == UNKNOWN and key in old:
+        if country == UNKNOWN and key in old and live_by_id.get(key, not retry_unknown):
             country = old[key][0]
             cached += 1
         groups[country].append((key, proxy))
@@ -162,6 +208,10 @@ def relabel_and_sort(
             results.append(proxy)
 
     counts = {"total": len(items), "fresh": len(checked), "historical": cached, "unknown": len(groups.get(UNKNOWN, []))}
+    if retry_unknown:
+        counts.update({"live": sum(bool(x) for x in live_by_id.values()),
+                       "not_live": len(ids) - sum(bool(live_by_id.get(k, False)) for k in ids),
+                       "recovered": len(discovered) - first_count})
     return results, counts
 
 

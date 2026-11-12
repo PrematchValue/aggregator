@@ -282,6 +282,14 @@ def aggregate(args: argparse.Namespace) -> None:
 
     results = pipeline.execute_tasks(tasks)
     proxies = list(itertools.chain.from_iterable([x[1] for x in results if x]))
+    # Reviewable public Clash feeds complement airport registration and are
+    # reloaded on BOTH Collect and Refresh. Never persist them as private
+    # subscription URLs, or let a temporary public-feed outage expire a source.
+    if getattr(args, 'public_sources', False):
+        from public_sources import gather_public_nodes
+        public_nodes, public_counts = gather_public_nodes(logger=logger)
+        logger.info(f"公开节点：新增候选={len(public_nodes)}，成功读取源={sum(n > 0 for n in public_counts.values())}")
+        proxies.extend(public_nodes)
     proxies = safety.valid_nodes(proxies)
 
     if len(proxies) == 0:
@@ -357,12 +365,16 @@ def aggregate(args: argparse.Namespace) -> None:
             nodes,
             previous_clash=previous.get("clash.yaml", ""),
             num_threads=min(max(1, args.num), 24),
-            chunk_size=80,
+            chunk_size=55,
+            retry_unknown=True,
         )
         logger.info(
             f"地区整理：总数={geo_stats['total']}，出口新确认={geo_stats['fresh']}，"
             f"沿用历史地区={geo_stats['historical']}，未知={geo_stats['unknown']}；筛除未知地区"
         )
+        logger.info(f"真实代理连通性：验证通过={geo_stats.get('live', 0)}，"
+                    f"验证失败或不确定={geo_stats.get('not_live', 0)}，"
+                    f"二轮补回地区={geo_stats.get('recovered', 0)}；仅代表GitHub云端")
         from node_labels import only_confirmed
         nodes, removed_unknown = only_confirmed(nodes)
         logger.info(f"地区筛选：保留={len(nodes)}，剔除未知={removed_unknown}")
@@ -719,6 +731,11 @@ if __name__ == "__main__":
         required=False,
         default=os.environ.get("CUSTOMIZE_LINK", ""),
         help="the url to the list of airports that you maintain yourself",
+    )
+
+    parser.add_argument(
+        '--public-sources', action='store_true', default=False,
+        help='collect additional reviewed public YAML feeds on Collect/Refresh',
     )
 
     parser.add_argument("--geo-rename", action="store_true", help="identify egress location and sort nodes")
