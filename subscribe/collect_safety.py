@@ -127,8 +127,8 @@ def artifact_count(content, target):
         raise PublicationError(f"invalid or empty converted artifact: {target}") from None
 
 
-def check_publication(artifacts, previous, urls, ratio=0.5):
-    if not urls:
+def check_publication(artifacts, previous, urls, ratio=0.5, *, allow_public_only=False):
+    if not urls and not allow_public_only:
         raise PublicationError("no successful source subscriptions; keeping previous publication")
     old_urls = subscription_urls(previous.get("subscribes.txt", ""))
     if old_urls and len(old_urls & set(urls)) < len(old_urls) * ratio:

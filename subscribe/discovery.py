@@ -47,6 +47,7 @@ class AirportRecord:
     invite_code: str = ""
     api_prefix: str = ""
     source: str = ""
+    origin_domain: str = ""  # original discovered site before backend redirect
 
     def to_line(self, delimiter: str, full: bool = False) -> str:
         delimiter = utils.trim(delimiter) or DEFAULT_DELIMITER
@@ -612,6 +613,53 @@ class AirportCollector:
         resolved = self._resolve(candidates)
         return self._validate(resolved)
 
+    def collect_incremental(self, state, checkpoint, chunk_size: int = 250) -> dict[str, AirportRecord]:
+        """Always rediscover every configured source; probe never/overdue hosts.
+
+        Commit scan-state after each small backend-probe batch, not after hours
+        of registration/geo/format conversion. An interrupted batch remains due.
+        """
+        discovered, persisted = self._discover()
+        self._persist(persisted)
+        current_discovery_count = len(discovered)
+        # Save ALL discovered public site origins before backend probes. The
+        # outstanding queue survives even when a directory removes old links.
+        newly_seen = state.remember_discoveries(discovered)
+        from scan_state import site_key
+        known_ids = {site_key(url) for url in discovered}
+        for old_url in state.known_sites():
+            key = site_key(old_url)
+            if key not in known_ids:
+                discovered[old_url] = AirportRecord(domain=old_url, source="history")
+                known_ids.add(key)
+        checkpoint.save()
+        logger.info(f"机场发现清单已保存：本轮来源发现={current_discovery_count}，"
+                    f"新增历史候选={newly_seen}，历史候选总数={len(state.sites)}")
+        selected, stats = state.select(
+            discovered, excluded_hosts=self.options.exclude_hosts,
+            budget=self.options.max_candidates)
+        logger.info(f"增量全面发现：发现={stats['discovered']}，从未探测={stats['new']}，"
+                    f"到期复查={stats['due']}，冷却中={stats['waiting']}，"
+                    f"本轮选择={stats['selected']}，留待下轮={stats['remaining']}")
+        if not selected:
+            return {}
+        ordered = list(selected.items())
+        available = {}
+        for offset in range(0, len(ordered), max(1, chunk_size)):
+            group = dict(ordered[offset:offset + max(1, chunk_size)])
+            resolved = self._resolve(group)
+            approved = self._validate(resolved)
+            # Always remember that we tried *original* hosts, even if the
+            # backend redirected to an entirely different hostname.
+            origins = {record.origin_domain for record in approved.values()
+                       if record.origin_domain}
+            state.mark_sites(group, origins)
+            checkpoint.save()
+            available.update(approved)
+            logger.info(f"机场断点已保存：已探测={min(offset + len(group), len(ordered))}/"
+                        f"{len(ordered)}，合格后台累计={len(available)}")
+        return available
+
     def _discover(self) -> tuple[dict[str, AirportRecord], dict[str, AirportRecord]]:
         discovered: dict[str, AirportRecord] = {}
         persisted: dict[str, AirportRecord] = {}
@@ -660,6 +708,7 @@ class AirportCollector:
                     coupon=origin.coupon,
                     invite_code=origin.invite_code,
                     source=origin.source,
+                    origin_domain=origin.domain,
                 )
             )
         return resolved
@@ -711,6 +760,8 @@ def collect_airport(
     skip_captcha: bool = False,
     max_candidates: int = 0,
     exclude_hosts: tuple[str, ...] = (),
+    incremental_state=None,
+    checkpoint=None,
 ) -> dict[str, AirportRecord]:
     options = CollectOptions(
         num_threads=num_threads,
@@ -722,4 +773,9 @@ def collect_airport(
         max_candidates=max_candidates,
         exclude_hosts=exclude_hosts,
     )
-    return AirportCollector.default(channel=channel, page_num=page_num, options=options).collect()
+    collector = AirportCollector.default(channel=channel, page_num=page_num, options=options)
+    if incremental_state is not None:
+        if checkpoint is None:
+            raise ValueError("incremental scan requires a durable checkpoint writer")
+        return collector.collect_incremental(incremental_state, checkpoint)
+    return collector.collect()
