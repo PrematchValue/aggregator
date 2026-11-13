@@ -263,76 +263,92 @@ def aggregate(args: argparse.Namespace) -> None:
     if gist_id and access_token:
         revision, previous = safety.read_gist(gist_id, access_token)
 
-    # A small rotation ledger is saved once after Refresh airport execution.
-    # No per-batch Gist checkpoints, repeated reads, or preflight PATCH writes.
-    rotation = None
-    if args.refresh:
-        from refresh_rotation import RefreshRotation
-        try:
-            rotation = RefreshRotation.load(previous.get("refresh-rotation.json", ""))
-        except (ValueError, TypeError) as exc:
-            raise safety.PublicationError("invalid refresh rotation state; keeping previous publication") from None
+    # Expensive discovery and short final publication are independent jobs.
+    stage_output = getattr(args, "stage_output", "")
+    publish_stage = getattr(args, "publish_stage", "")
+    staged_rotation = ""
+    if publish_stage:
+        if not gist_id or not access_token:
+            raise safety.PublicationError("staged publishing requires Gist credentials")
+        import node_pool
+        stage = node_pool.read_stage(publish_stage)
+        previous_nodes = node_pool.previous_candidates(previous)
+        proxies = node_pool.merge_nodes(previous_nodes, stage["nodes"])
+        old_subscriptions = set(stage["subscriptions"])
+        old_subscriptions.update(safety.subscription_urls(previous.get(subscribes_file, "")))
+        staged_rotation = node_pool.merge_rotation(
+            previous.get("refresh-rotation.json", ""), stage["rotation"]
+        )
+        logger.info(f"节点池复检：历史候选={len(previous_nodes)}，本轮候选={len(stage['nodes'])}，"
+                    f"去重后={len(proxies)}")
+    else:
+        rotation = None
+        if args.refresh:
+            from refresh_rotation import RefreshRotation
+            try:
+                rotation = RefreshRotation.load(previous.get("refresh-rotation.json", ""))
+            except (ValueError, TypeError):
+                raise safety.PublicationError("invalid refresh rotation state") from None
 
-    unresolved_sources: set[str] = set()
-    tasks = assign(
-        bin_name=subconverter_bin,
-        domains_file="domains.txt",
-        overwrite=args.overwrite,
-        pages=args.pages,
-        allow_gmail_alias=args.easygoing,
-        display=display,
-        num_threads=args.num,
-        refresh=args.refresh,
-        skip_captcha=args.skip_captcha,
-        username=username,
-        gist_id=gist_id,
-        access_token=access_token,
-        subscribes_file=subscribes_file,
-        customize_link=args.custom_sites,
-        max_candidates=args.max_candidates,
-        existing_subscriptions=safety.subscription_urls(previous.get(subscribes_file, "")) if revision else None,
-        unresolved_sources=unresolved_sources,
-        rotation=rotation,
-    )
+        unresolved_sources: set[str] = set()
+        tasks = assign(
+            bin_name=subconverter_bin,
+            domains_file="domains.txt",
+            overwrite=args.overwrite,
+            pages=args.pages,
+            allow_gmail_alias=args.easygoing,
+            display=display,
+            num_threads=args.num,
+            refresh=args.refresh,
+            skip_captcha=args.skip_captcha,
+            username=username,
+            gist_id=gist_id,
+            access_token=access_token,
+            subscribes_file=subscribes_file,
+            customize_link=args.custom_sites,
+            max_candidates=args.max_candidates,
+            existing_subscriptions=safety.subscription_urls(previous.get(subscribes_file, "")) if revision else None,
+            unresolved_sources=unresolved_sources,
+            rotation=rotation,
+        )
+        if not tasks and not getattr(args, "public_sources", False) and not stage_output:
+            if rotation is not None and rotation.pending:
+                rotation.advance()
+                revision = rotation.persist(gist_id, access_token, previous)
+                logger.warning("Refresh 没有可注册任务，轮换记录已保存")
+            logger.error("cannot found any valid config, exit")
+            sys.exit(1)
 
-    if not tasks and not getattr(args, "public_sources", False):
+        old_subscriptions = set()
+        for task in tasks:
+            old_subscriptions.update(task.nodes.subscribe_list())
+        logger.info(f"start generate subscribes information, tasks: {len(tasks)}")
+        results = pipeline.execute_tasks(tasks)
         if rotation is not None and rotation.pending:
             rotation.advance()
-            revision = rotation.persist(gist_id, access_token, previous)
-            logger.warning("Refresh 没有可注册任务，轮换记录已保存，下一次继续新的一批")
-        logger.error("cannot found any valid config, exit")
-        sys.exit(1)
+            if not stage_output:
+                revision = rotation.persist(gist_id, access_token, previous)
+                previous["refresh-rotation.json"] = rotation.encode()
+            logger.info(f"Refresh 轮换记录更新：本周期已处理={len(rotation.done)} 个机场")
+        proxies = list(itertools.chain.from_iterable([x[1] for x in results if x]))
+        if getattr(args, "public_sources", False):
+            from public_sources import gather_public_nodes
+            public_nodes, public_counts = gather_public_nodes(logger=logger)
+            logger.info(f"公开节点：新增候选={len(public_nodes)}，成功读取源={sum(n > 0 for n in public_counts.values())}")
+            proxies.extend(public_nodes)
 
-    # 已有订阅已经做过过期检查，无需再测
-    old_subscriptions = set()
-    for task in tasks:
-        old_subscriptions.update(task.nodes.subscribe_list())
+        if stage_output:
+            import node_pool
+            cleaned = safety.valid_nodes(proxies)
+            node_pool.write_stage(stage_output, cleaned, old_subscriptions,
+                                  rotation.encode() if rotation is not None else "")
+            logger.info(f"本轮采集已保存：候选节点={len(cleaned)}；发布阶段统一复检节点池")
+            return
 
-    logger.info(f"start generate subscribes information, tasks: {len(tasks)}")
     generate_conf = os.path.join(PATH, "subconverter", "generate.ini")
-    if os.path.exists(generate_conf) and os.path.isfile(generate_conf):
+    if os.path.isfile(generate_conf):
         os.remove(generate_conf)
 
-    results = pipeline.execute_tasks(tasks)
-    if rotation is not None and rotation.pending:
-        rotation.advance()
-        revision = rotation.persist(gist_id, access_token, previous)
-        previous["refresh-rotation.json"] = rotation.encode()
-        logger.info(f"Refresh 轮换记录已保存：本周期已处理={len(rotation.done)} 个机场")
-    proxies = list(itertools.chain.from_iterable([x[1] for x in results if x]))
-    # Reviewable public Clash feeds complement airport registration and are
-    # reloaded on BOTH Collect and Refresh. Never persist them as private
-    # subscription URLs, or let a temporary public-feed outage expire a source.
-    if getattr(args, 'public_sources', False):
-        from public_sources import gather_public_nodes
-        public_nodes, public_counts = gather_public_nodes(logger=logger)
-        logger.info(f"公开节点：新增候选={len(public_nodes)}，成功读取源={sum(n > 0 for n in public_counts.values())}")
-        proxies.extend(public_nodes)
-    # Last published, flag-confirmed nodes remain available as *candidates*
-    # for new real HTTP and egress checks even if a source times out today.
-    # They receive NO automatic pass and are not written back unless verified.
-    # Do not republish expired nodes merely because they were in an old Gist.
-    # The upstream collector must fetch them from currently valid subscriptions.
     proxies = safety.valid_nodes(proxies)
 
     if len(proxies) == 0:
@@ -556,6 +572,12 @@ def aggregate(args: argparse.Namespace) -> None:
 
         if urls:
             files[subscribes_file] = {"content": "\n".join(urls), "filename": subscribes_file}
+        if publish_stage:
+            files[node_pool.POOL_FILE] = {"content": node_pool.encode_pool(nodes),
+                                          "filename": node_pool.POOL_FILE}
+            if staged_rotation:
+                files["refresh-rotation.json"] = {"content": staged_rotation,
+                                                   "filename": "refresh-rotation.json"}
         if files:
             current_revision, current_files = safety.read_gist(gist_id, access_token)
             if current_revision != revision:
@@ -787,7 +809,11 @@ if __name__ == "__main__":
     parser.add_argument("--geo-rename", action="store_true", help="identify egress location and sort nodes")
     parser.add_argument("--max-candidates", type=int, default=100, help="maximum new airports per collection")
     parser.add_argument("--probe-sample", type=int, default=0, help="advisory public TCP endpoint sample; never removes nodes")
+    parser.add_argument("--stage-output", default="", help="save candidate nodes for publishing")
+    parser.add_argument("--publish-stage", default="", help="recheck and publish staged nodes plus latest Gist pool")
     args = parser.parse_args()
+    if args.stage_output and args.publish_stage:
+        parser.error("--stage-output and --publish-stage cannot be combined")
     if args.max_candidates < 0 or args.probe_sample < 0:
         parser.error("max-candidates must be nonnegative (0 means full collection)")
     try:

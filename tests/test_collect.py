@@ -357,6 +357,41 @@ class AggregateTests(unittest.TestCase):
             collect.aggregate(self.args)
         self.assertEqual(local.read_text(), "previous-content")
 
+    def test_stage_writes_candidates_without_publishing(self):
+        import node_pool
+        path = self.root / "candidate-stage.json"
+        self.args.stage_output = str(path)
+        collect.aggregate(self.args)
+        self.assert_no_publish()
+        staged = node_pool.read_stage(str(path))
+        self.assertEqual(len(staged["nodes"]), 4)
+        self.assertIn("https://source.example/sub", staged["subscriptions"])
+
+    def test_publish_merges_current_pool_and_new_candidates(self):
+        import node_pool
+        path = self.root / "candidate-stage.json"
+        node_pool.write_stage(str(path), [node(4)], {"https://new.example/sub"})
+        self.files[node_pool.POOL_FILE] = node_pool.encode_pool([node(0)])
+        self.args.publish_stage = str(path)
+        collect.aggregate(self.args)
+        self.mocks["assign"].assert_not_called()
+        payload = self.mocks["push.PushToGist"].return_value.push_to.call_args.kwargs["payload"]["files"]
+        self.assertEqual(len(json.loads(payload["node-pool.json"]["content"])["nodes"]), 2)
+        self.assertEqual(set(payload["subscribes.txt"]["content"].splitlines()),
+                         {"https://source.example/sub", "https://new.example/sub"})
+
+    def test_publish_bootstraps_from_existing_clash(self):
+        import node_pool
+        path = self.root / "candidate-stage.json"
+        node_pool.write_stage(str(path), [node(1)], set())
+        self.files["clash.yaml"] = yaml.safe_dump({
+            "proxies": [dict(node(0), name="🇯🇵 日本 001")]
+        }, allow_unicode=True)
+        self.args.publish_stage = str(path)
+        collect.aggregate(self.args)
+        payload = self.mocks["push.PushToGist"].return_value.push_to.call_args.kwargs["payload"]["files"]
+        self.assertEqual(len(json.loads(payload["node-pool.json"]["content"])["nodes"]), 2)
+
     def test_no_valid_nodes_blocks_publish(self):
         self.mocks["pipeline.execute_tasks"].return_value = [(1, [{"type": "direct"}])]
         with self.assertRaises(SystemExit) as result:
