@@ -1,7 +1,7 @@
 name: Refresh
 on:
   schedule:
-    - cron: "0 */2 * * *"
+    - cron: "17 */2 * * *"
   workflow_dispatch:
 
 # Refresh must not wait behind a weekly full Collect run.
