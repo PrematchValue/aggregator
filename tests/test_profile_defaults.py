@@ -45,18 +45,30 @@ class ProfileAndScheduleTests(unittest.TestCase):
         keyed = {g['key']:g['value'] for g in pref['template']['globals']}
         self.assertEqual(keyed['singbox.allow_lan'], 'false')
 
-    def test_refresh_two_schedule_slots_and_9000(self):
+    def test_refresh_four_hour_full_scan(self):
         yml = (ROOT/'.github/workflows/refresh.yaml').read_text(encoding='utf-8')
-        self.assertIn('cron: "17 */2 * * *"', yml)
-        self.assertIn('cron: "47 */2 * * *"', yml)
-        self.assertIn('--max-candidates 9000', yml)
-        self.assertIn('timeout-minutes: 210', yml)
+        self.assertIn('cron: "17 */4 * * *"', yml)
+        self.assertIn('cron: "47 */4 * * *"', yml)
+        self.assertIn('--max-candidates 0', yml)
+        self.assertNotIn('--max-candidates 9000', yml)
+        self.assertNotIn('--overwrite --refresh', yml)
+        self.assertIn('timeout-minutes: 330', yml)
         self.assertIn('queue: max', yml)
         self.assertIn('needs: schedule_guard', yml)
         self.assertIn('needs.schedule_guard.outputs.run_refresh', yml)
         workflow = yaml.safe_load(yml)
         self.assertIn('schedule_guard', workflow['jobs'])
         self.assertEqual(workflow['jobs']['process']['needs'], 'schedule_guard')
+
+    def test_weekly_workflow_only_checks_upstream(self):
+        yml = (ROOT/'.github/workflows/collect.yaml').read_text(encoding='utf-8')
+        self.assertIn('name: Weekly Upstream Check', yml)
+        self.assertIn('cron: "0 0 * * 1"', yml)
+        self.assertIn("git fetch --no-tags https://github.com/wzdnzd/aggregator.git", yml)
+        workflow = yaml.safe_load(yml)
+        self.assertEqual(list(workflow['jobs']), ['upstream'])
+        self.assertNotIn('candidate-stage.json', yml)
+        self.assertNotIn('GIST_PAT', yml)
 
 
 if __name__ == '__main__':

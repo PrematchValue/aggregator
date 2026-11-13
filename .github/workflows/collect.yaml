@@ -1,12 +1,12 @@
-name: Collect
+name: Weekly Upstream Check
 on:
   # Every Monday at 08:00 Beijing time, GitHub cron is UTC.
   schedule:
     - cron: "0 0 * * 1"
   workflow_dispatch:
 
-# Collection and Refresh can collect independently; Gist revision checking
-# prevents a stale run overwriting a newer publication.
+# Weekly workflow only checks and safely merges upstream code.
+# Refresh handles all node discovery, validation, conversion and publication.
 concurrency:
   group: collect-${{ github.repository }}
   cancel-in-progress: false
@@ -68,72 +68,3 @@ jobs:
           fi
           git push origin HEAD:main
           echo "上游代码已合并，通过测试并推送至 main" >> "$GITHUB_STEP_SUMMARY"
-
-  process:
-    needs: upstream
-    if: ${{ always() && needs.upstream.result != 'cancelled' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 330
-    env:
-      TZ: Asia/Shanghai
-      GIST_PAT: ${{ secrets.GIST_PAT }}
-      GIST_LINK: ${{ secrets.GIST_LINK }}
-      CUSTOMIZE_LINK: ${{ secrets.CUSTOMIZE_LINK }}
-      ENABLE_SPECIAL_PROTOCOLS: ${{ vars.ENABLE_SPECIAL_PROTOCOLS }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.x"
-          architecture: x64
-          cache: pip
-      - run: pip3 install -r requirements.txt
-      - name: Validate Gist credentials
-        shell: bash
-        run: |
-          test -n "$GIST_PAT" && test -n "$GIST_LINK"
-          [[ "$GIST_LINK" =~ ^[^/]+/[^/]+$ ]]
-      - name: Collect full discovery with upstream check, single country lookup and sorted labels
-        run: python -u subscribe/collect.py --all --overwrite --pages 500 --skip-captcha --max-candidates 0 --geo-rename -t clash v2ray singbox surge --stage-output candidate-stage.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: node-candidates
-          path: candidate-stage.json
-          retention-days: 3
-          if-no-files-found: error
-      - run: date
-
-  publish:
-    needs: process
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    concurrency:
-      group: gist-publish-${{ github.repository }}
-      queue: max
-      cancel-in-progress: false
-    env:
-      TZ: Asia/Shanghai
-      GIST_PAT: ${{ secrets.GIST_PAT }}
-      GIST_LINK: ${{ secrets.GIST_LINK }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-      - run: python -m pip install -r requirements.txt
-      - uses: actions/download-artifact@v4
-        with:
-          name: node-candidates
-          path: staging
-      - name: Validate Gist credentials
-        shell: bash
-        run: |
-          test -n "$GIST_PAT" && test -n "$GIST_LINK"
-          [[ "$GIST_LINK" =~ ^[^/]+/[^/]+$ ]]
-      - name: Merge and recheck latest node pool, convert and publish
-        run: python -u subscribe/collect.py --all --geo-rename --publish-stage staging/candidate-stage.json -t clash v2ray singbox surge
