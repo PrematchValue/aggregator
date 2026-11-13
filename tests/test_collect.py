@@ -179,6 +179,14 @@ class AggregateTests(unittest.TestCase):
         self.mocks["safety.read_gist"].return_value = ("v1", self.files)
         self.mocks["subconverter.generate_conf"].return_value = True
         self.mocks["subconverter.convert"].side_effect = self.convert
+        # Existing aggregate tests mock the conversion artifacts. Their sample
+        # names intentionally differ from the input. Test coverage behavior
+        # separately in tests/test_protocol_coverage.py.
+        p = patch("protocol_coverage.reconcile", side_effect=lambda target, content, nodes:
+                  (content, {"expected": len(nodes), "found": len(nodes),
+                             "restored": 0, "unsupported": {}, "by_protocol": {}}))
+        p.start()
+        self.addCleanup(p.stop)
         self.mocks["push.PushToGist"].return_value.push_to.return_value = True
         self.root = root
 

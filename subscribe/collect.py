@@ -512,6 +512,22 @@ def aggregate(args: argparse.Namespace) -> None:
                 f"生成={safety.artifact_count(content, 'v2ray')}，"
                 f"不支持协议数={sum(skipped.values())}；不输出凭据"
             )
+        # Cross-format coverage: preserve all confirmed, representable nodes.
+        # This runs only on the short publication phase in normal workflows.
+        if t[2] in ("clash", "surge", "singbox"):
+            from protocol_coverage import CoverageError, reconcile
+            try:
+                content, coverage = reconcile(t[2], content, nodes)
+            except CoverageError as exc:
+                raise safety.PublicationError(str(exc)) from None
+            with open(output, "w", encoding="utf-8") as verified_file:
+                verified_file.write(content)
+            missing_types = ", ".join(f"{k}:{v}" for k, v in sorted(coverage["unsupported"].items())) or "无"
+            protocol_counts = ", ".join(
+                f"{kind}={counts['found']}/{counts['expected']}"
+                for kind, counts in sorted(coverage["by_protocol"].items()))
+            logger.info(f"协议核对[{t[2]}]：应导出={coverage['expected']}，已导出={coverage['found']}，"
+                        f"补回={coverage['restored']}，不兼容={missing_types}；各协议：{protocol_counts}")
         safety.artifact_count(content, t[2])
         artifacts[t[1]] = (t[2], content)
         records[t[1]] = output

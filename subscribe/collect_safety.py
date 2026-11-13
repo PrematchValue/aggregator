@@ -112,7 +112,7 @@ def artifact_count(content, target):
                 if line.startswith("[") and line.endswith("]"):
                     section = line[1:-1].lower()
                 elif section == "proxy" and re.match(
-                    r"[^#;=]+\s*=\s*(?:ss|ssr|vmess|trojan|https?|socks5(?:-tls)?|snell|tuic|hysteria2|wireguard)\s*,\s*\S+",
+                    r"[^#;=]+\s*=\s*(?:ss|ssr|vmess|vless|trojan|anytls|masque|ssh|h2-connect|trust-tunnel|https?|socks5(?:-tls)?|snell|tuic(?:-v5)?|hysteria2|wireguard)\s*,\s*\S+",
                     line, re.I,
                 ):
                     count += 1
