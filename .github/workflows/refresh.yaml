@@ -5,7 +5,6 @@ on:
     - cron: "47 */4 * * *"
   workflow_dispatch:
 
-# Refresh must not wait behind a weekly full Collect run.
 concurrency:
   group: refresh-${{ github.repository }}
   queue: max
@@ -31,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
-      - name: Skip redundant scheduled runs, but always allow manual runs
+      - name: Skip duplicate scheduled runs; allow manual runs
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
@@ -51,51 +50,11 @@ jobs:
           python-version: "3.x"
           architecture: x64
           cache: pip
-      - run: pip3 install -r requirements.txt
-      - name: Validate Gist credentials
-        shell: bash
-        run: |
-          test -n "$GIST_PAT" && test -n "$GIST_LINK"
-          [[ "$GIST_LINK" =~ ^[^/]+/[^/]+$ ]]
-      - name: Refresh full discovery of all airport candidates, maintain subscriptions
-        run: python -u subscribe/collect.py --all --overwrite --pages 500 --skip-captcha --max-candidates 0 --geo-rename -t clash v2ray singbox surge --stage-output candidate-stage.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: node-candidates
-          path: candidate-stage.json
-          retention-days: 3
-          if-no-files-found: error
-      - run: date
-
-  publish:
-    needs: process
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    concurrency:
-      group: gist-publish-${{ github.repository }}
-      queue: max
-      cancel-in-progress: false
-    env:
-      TZ: Asia/Shanghai
-      GIST_PAT: ${{ secrets.GIST_PAT }}
-      GIST_LINK: ${{ secrets.GIST_LINK }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
       - run: python -m pip install -r requirements.txt
-      - uses: actions/download-artifact@v4
-        with:
-          name: node-candidates
-          path: staging
       - name: Validate Gist credentials
         shell: bash
         run: |
           test -n "$GIST_PAT" && test -n "$GIST_LINK"
           [[ "$GIST_LINK" =~ ^[^/]+/[^/]+$ ]]
-      - name: Merge and recheck latest node pool, convert and publish
-        run: python -u subscribe/collect.py --all --geo-rename --publish-stage staging/candidate-stage.json -t clash v2ray singbox surge
+      - name: Upstream full discovery, liveness, egress labels, conversion and publication
+        run: python -u subscribe/collect.py --all --overwrite --pages 500 --skip-captcha --geo-rename -t clash v2ray singbox surge

@@ -19,7 +19,6 @@ import push
 import utils
 import workflow
 import yaml
-import collect_safety as safety
 from airport import AirPort
 from config.models import NodeInput, SiteConfig, StorageItem
 from crawl.helpers import check_status, naming_task
@@ -40,7 +39,7 @@ def assign(
     bin_name: str,
     domains_file: str = "",
     overwrite: bool = False,
-    pages: int = 50,
+    pages: int = sys.maxsize,
     allow_gmail_alias: bool = False,
     display: bool = True,
     num_threads: int = 0,
@@ -60,9 +59,7 @@ def assign(
                 if items:
                     subscriptions.update(items)
 
-        if kwargs.get("existing_subscriptions") is not None:
-            subscriptions.update(kwargs["existing_subscriptions"])
-        elif username and gist_id and access_token:
+        if username and gist_id and access_token:
             push_tool = push.PushToGist(token=access_token)
             url = push_tool.raw_url(item=StorageItem(username=username, gist_id=gist_id, filename=filename))
 
@@ -82,33 +79,7 @@ def assign(
             show_progress=display,
         )
 
-        # A temporary timeout or an incomplete status response is NOT expiry
-        # proof. Keep such URLs for retry by pipeline.execute_tasks instead of
-        # blocking an entire Collect/Refresh or silently deleting the source.
-        # Only explicit expiry (the second status flag) permits deletion.
-        responses = list(results or [])
-        active, unresolved, expired = [], [], []
-        for index, link in enumerate(links):
-            result = responses[index] if index < len(responses) else None
-            if isinstance(result, (tuple, list)) and len(result) >= 2:
-                if result[1]:
-                    expired.append(link)
-                elif result[0]:
-                    active.append(link)
-                else:
-                    unresolved.append(link)
-            else:
-                unresolved.append(link)
-
-        # Return details to aggregate without changing assign's return type.
-        unresolved_sources = kwargs.get("unresolved_sources")
-        if isinstance(unresolved_sources, set):
-            unresolved_sources.update(unresolved)
-        logger.info(
-            f"历史订阅校验：正常={len(active)}，暂不可达={len(unresolved)}，"
-            f"明确过期={len(expired)}；暂不可达保留并继续采集"
-        )
-        return active + unresolved
+        return [links[i] for i in range(len(links)) if results[i][0] and not results[i][1]]
 
     subscribes_file = utils.trim(kwargs.get("subscribes_file", ""))
     access_token = utils.trim(kwargs.get("access_token", ""))
@@ -138,16 +109,12 @@ def assign(
         else []
     )
 
-    # Refresh also discovers and registers new airports. Only its execution
-    # window differs from weekly Collect. Existing subscriptions are updated.
-    if kwargs.get("refresh", False):
-        logger.info("Refresh：全量发现，轮换执行新机场，同时维护已有订阅")
-
-    max_candidates = max(0, int(kwargs.get("max_candidates", 100)))
-    excluded = {utils.extract_domain(x, False).lower() for x in subscriptions}
+    # 仅更新已有订阅
+    if tasks and kwargs.get("refresh", False):
+        logger.info("skip registering new accounts, will use existing subscriptions for refreshing")
+        return tasks
 
     records: dict[str, AirportRecord] = {}
-    crawled = {}
     delimiter = "@#@#"
     domains_file = utils.trim(domains_file)
     if not domains_file:
@@ -170,19 +137,17 @@ def assign(
             filepath=os.path.join(DATA_BASE, "coupons.txt"),
             delimiter=delimiter,
             skip_captcha=skip_captcha,
-            max_candidates=max_candidates,
-            exclude_hosts=tuple(excluded),
-            rotation=kwargs.get("rotation"),
         )
 
         if crawled:
-            # Overwrite means replace the stale catalogue, not append its entire history.
-            records = dict(crawled)
+            for domain, incoming in crawled.items():
+                current = records.get(domain)
+                if current is None:
+                    records[domain] = incoming
+                else:
+                    current.coupon = incoming.coupon
+                    current.api_prefix = incoming.api_prefix
             overwrite = True
-
-    # A failed discovery must not fall back to probing the entire stale catalogue.
-    if overwrite and not crawled:
-        records = {}
 
     # 加载自定义机场列表
     customize_link = utils.trim(kwargs.get("customize_link", ""))
@@ -199,7 +164,6 @@ def assign(
         logger.error("cannot collect any new airport for free use")
         return tasks
 
-    records = select_candidates(records, excluded, max_candidates)
     if overwrite:
         save_records(records=records, filepath=fullpath, delimiter=delimiter, full=True)
 
@@ -228,20 +192,6 @@ def assign(
     return tasks
 
 
-def select_candidates(records, excluded, limit):
-    selected, seen = {}, set(excluded)
-    for domain, record in records.items():
-        host = utils.extract_domain(domain, False).lower()
-        if not host or host in seen or not isurl(domain):
-            continue
-        seen.add(host)
-        selected[domain] = record
-        if limit > 0 and len(selected) >= limit:
-            break
-    logger.info(f"candidate budget: selected={len(selected)}, skipped={len(records) - len(selected)}")
-    return selected
-
-
 def aggregate(args: argparse.Namespace) -> None:
     def parse_gist_link(link: str) -> tuple[str, str]:
         # 提取 gist 用户名及 id
@@ -259,104 +209,43 @@ def aggregate(args: argparse.Namespace) -> None:
     access_token = utils.trim(args.key)
     username, gist_id = parse_gist_link(args.gist)
 
-    revision, previous = "", {}
-    if gist_id and access_token:
-        revision, previous = safety.read_gist(gist_id, access_token)
+    tasks = assign(
+        bin_name=subconverter_bin,
+        domains_file="domains.txt",
+        overwrite=args.overwrite,
+        pages=args.pages,
+        allow_gmail_alias=args.easygoing,
+        display=display,
+        num_threads=args.num,
+        refresh=args.refresh,
+        skip_captcha=args.skip_captcha,
+        username=username,
+        gist_id=gist_id,
+        access_token=access_token,
+        subscribes_file=subscribes_file,
+        customize_link=args.custom_sites,
+    )
 
-    # Expensive discovery and short final publication are independent jobs.
-    stage_output = getattr(args, "stage_output", "")
-    publish_stage = getattr(args, "publish_stage", "")
-    staged_rotation = ""
-    if publish_stage:
-        if not gist_id or not access_token:
-            raise safety.PublicationError("staged publishing requires Gist credentials")
-        import node_pool
-        stage = node_pool.read_stage(publish_stage)
-        previous_nodes = node_pool.previous_candidates(previous)
-        proxies = node_pool.merge_nodes(previous_nodes, stage["nodes"])
-        old_subscriptions = set(stage["subscriptions"])
-        old_subscriptions.update(safety.subscription_urls(previous.get(subscribes_file, "")))
-        staged_rotation = node_pool.merge_rotation(
-            previous.get("refresh-rotation.json", ""), stage["rotation"]
-        )
-        logger.info(f"节点池复检：历史候选={len(previous_nodes)}，本轮候选={len(stage['nodes'])}，"
-                    f"去重后={len(proxies)}")
-    else:
-        rotation = None
-        if args.refresh:
-            from refresh_rotation import RefreshRotation
-            try:
-                rotation = RefreshRotation.load(previous.get("refresh-rotation.json", ""))
-            except (ValueError, TypeError):
-                raise safety.PublicationError("invalid refresh rotation state") from None
+    if not tasks:
+        logger.error("cannot found any valid config, exit")
+        sys.exit(0)
 
-        unresolved_sources: set[str] = set()
-        tasks = assign(
-            bin_name=subconverter_bin,
-            domains_file="domains.txt",
-            overwrite=args.overwrite,
-            pages=args.pages,
-            allow_gmail_alias=args.easygoing,
-            display=display,
-            num_threads=args.num,
-            refresh=args.refresh,
-            skip_captcha=args.skip_captcha,
-            username=username,
-            gist_id=gist_id,
-            access_token=access_token,
-            subscribes_file=subscribes_file,
-            customize_link=args.custom_sites,
-            max_candidates=args.max_candidates,
-            existing_subscriptions=safety.subscription_urls(previous.get(subscribes_file, "")) if revision else None,
-            unresolved_sources=unresolved_sources,
-            rotation=rotation,
-        )
-        if not tasks and not getattr(args, "public_sources", False) and not stage_output:
-            if rotation is not None and rotation.pending:
-                rotation.advance()
-                revision = rotation.persist(gist_id, access_token, previous)
-                logger.warning("Refresh 没有可注册任务，轮换记录已保存")
-            logger.error("cannot found any valid config, exit")
-            sys.exit(1)
+    # 已有订阅已经做过过期检查，无需再测
+    old_subscriptions = set()
+    for task in tasks:
+        old_subscriptions.update(task.nodes.subscribe_list())
 
-        old_subscriptions = set()
-        for task in tasks:
-            old_subscriptions.update(task.nodes.subscribe_list())
-        logger.info(f"start generate subscribes information, tasks: {len(tasks)}")
-        results = pipeline.execute_tasks(tasks)
-        if rotation is not None and rotation.pending:
-            rotation.advance()
-            if not stage_output:
-                revision = rotation.persist(gist_id, access_token, previous)
-                previous["refresh-rotation.json"] = rotation.encode()
-            logger.info(f"Refresh 轮换记录更新：本周期已处理={len(rotation.done)} 个机场")
-        proxies = list(itertools.chain.from_iterable([x[1] for x in results if x]))
-        if getattr(args, "public_sources", False):
-            from public_sources import gather_public_nodes
-            public_nodes, public_counts = gather_public_nodes(logger=logger)
-            logger.info(f"公开节点：新增候选={len(public_nodes)}，成功读取源={sum(n > 0 for n in public_counts.values())}")
-            proxies.extend(public_nodes)
-
-        if stage_output:
-            import node_pool
-            cleaned = safety.valid_nodes(proxies)
-            node_pool.write_stage(stage_output, cleaned, old_subscriptions,
-                                  rotation.encode() if rotation is not None else "")
-            logger.info(f"本轮采集已保存：候选节点={len(cleaned)}；发布阶段统一复检节点池")
-            return
-
+    logger.info(f"start generate subscribes information, tasks: {len(tasks)}")
     generate_conf = os.path.join(PATH, "subconverter", "generate.ini")
-    if os.path.isfile(generate_conf):
+    if os.path.exists(generate_conf) and os.path.isfile(generate_conf):
         os.remove(generate_conf)
 
-    proxies = safety.valid_nodes(proxies)
+    results = pipeline.execute_tasks(tasks)
+    proxies = list(itertools.chain.from_iterable([x[1] for x in results if x]))
 
     if len(proxies) == 0:
         logger.error("exit because cannot fetch any proxy node")
-        sys.exit(1)
-
-    # Deduplication can merge identical nodes from several healthy subscriptions.
-    fetched_subscriptions = {p["sub"] for p in proxies if p.get("sub")}
+        sys.exit(0)
 
     nodes, workspace = [], os.path.join(PATH, "clash")
 
@@ -387,59 +276,37 @@ def aggregate(args: argparse.Namespace) -> None:
             [p, clash.EXTERNAL_CONTROLLER, 5000, args.url, args.delay, False] for p in proxies if isinstance(p, dict)
         ]
 
+        masks = utils.multi_thread_run(
+            func=clash.check,
+            tasks=params,
+            num_threads=args.num,
+            show_progress=display,
+        )
+
+        # 关闭clash
         try:
-            if process.poll() is not None:
-                raise safety.PublicationError("proxy checker failed to start; keeping previous publication")
-            masks = utils.multi_thread_run(
-                func=clash.check,
-                tasks=params,
-                num_threads=args.num,
-                show_progress=display,
-            )
-        finally:
             process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
+        except:
+            logger.error(f"terminate clash process error")
 
         nodes = [proxies[i] for i in range(len(proxies)) if masks[i]]
         if len(nodes) <= 0:
             logger.error(f"cannot fetch any proxy")
+            sys.exit(0)
+
+    # Presentation extension only: reuse upstream's Mihomo location engine.
+    # All discovery, liveness, parsing and conversion are upstream code.
+    if getattr(args, "geo_rename", False):
+        from geo_labels import label_verified_nodes
+        nodes, geo_stats = label_verified_nodes(nodes, num_threads=args.num)
+        logger.info(f"出口地区整理：检测={geo_stats['checked']}，确认={geo_stats['kept']}，"
+                    f"未知剔除={geo_stats['unknown']}；国旗命名与分区排序完成")
+        if not nodes:
+            logger.error("没有确认出口地区的节点；不更新订阅")
             sys.exit(1)
 
-    if args.probe_sample:
-        sample = random.sample(nodes, min(len(nodes), args.probe_sample))
-        checks = utils.multi_thread_run(safety.tcp_probe, sample, num_threads=min(args.num, 16))
-        logger.info(f"advisory TCP sample: checked={len(checks)}, reachable={checks.count('reachable')}, "
-                    f"unknown={checks.count('unknown')}, skipped={checks.count('skipped')}; no nodes removed")
-
-    # ONE egress-country lookup only AFTER original Clash liveness testing.
-    # No second HTTPS health check, no recursive Mihomo retry, no fake flags.
-    if getattr(args, "geo_rename", False):
-        from node_labels import relabel_and_sort, only_confirmed
-        from light_geo import locate_once
-        original_types = [str(p.get("type", "unknown")) for p in nodes]
-        nodes, geo_stats = relabel_and_sort(
-            nodes, previous_clash=previous.get("clash.yaml", ""),
-            num_threads=min(max(1, args.num), 24), chunk_size=32,
-            query_func=locate_once, retry_unknown=False,
-        )
-        nodes, removed_unknown = only_confirmed(nodes)
-        for item in nodes:
-            item.pop("_verified_http", None)  # internal test marker, not Clash syntax
-        logger.info(f"地区整理：连通通过后查询={geo_stats['total']}，新确认={geo_stats['fresh']}，"
-                    f"历史地区复用={geo_stats['historical']}，未知剔除={removed_unknown}；重新编号排序")
-        from egress_region import format_protocol_summary
-        logger.info("地区筛选按协议：" + format_protocol_summary(
-            original_types, [str(p.get('type', 'unknown')) for p in nodes]
-        ))
-        if not nodes:
-            raise safety.PublicationError("no region-confirmed nodes; keeping previous Gist publication")
-
-    subscriptions = set(fetched_subscriptions) if args.skip else set()
-    for p in nodes:
+    subscriptions = set()
+    for p in proxies:
         # 移除无用的标记
         p.pop("liveness", True)
 
@@ -447,12 +314,8 @@ def aggregate(args: argparse.Namespace) -> None:
         if sub:
             subscriptions.add(sub)
 
-    # Keep all previous subscriptions that were not explicitly expired,
-    # including sources that gave no nodes in this run due to a transient
-    # network error. Otherwise they would vanish from subscribes.txt/Gist.
-    subscriptions.update(old_subscriptions)
     data = {"proxies": nodes}
-    urls = sorted(subscriptions)
+    urls = list(subscriptions)
     source = "proxies.yaml"
 
     # 如果文件夹不存在则创建
@@ -478,107 +341,40 @@ def aggregate(args: argparse.Namespace) -> None:
         list_only = False if target == "v2ray" or target == "mixed" or "ss" in target else not args.all
         targets.append((convert_name, filename, target, list_only, args.ignore_default_filters))
 
-    # A malformed node or unsupported target format must not spoil the current
-    # node pool or the other subscriptions. Failed formats are omitted from the
-    # Gist PATCH, which leaves their prior published files untouched.
-    artifacts, records, failed_formats = {}, {}, {}
     for t in targets:
-        output = os.path.join(PATH, "subconverter", t[1])
-        stage = "准备转换"
-        try:
-            if os.path.isfile(output):
-                os.remove(output)
-            stage = "生成转换配置"
-            success = subconverter.generate_conf(
-                generate_conf, t[0], source, t[1], t[2],
-                None if getattr(args, 'geo_rename', False) else True, t[3], t[4]
-            )
-            if not success:
-                raise safety.PublicationError("converter configuration unavailable")
-
-            stage = "转换订阅"
-            if not subconverter.convert(binname=subconverter_bin, artifact=t[0]) or not os.path.isfile(output):
-                raise safety.PublicationError("converter output unavailable")
-            with open(output, encoding="utf-8") as handle:
-                content = handle.read()
-
-            if t[2] == "v2ray" and not content.strip():
-                stage = "恢复 V2Ray 链接"
-                # Preserve the existing URI fallback. Failure of this one
-                # format cannot block Clash/Surge/Sing-box publication.
-                from v2ray_fallback import build_subscription
-                content, skipped = build_subscription(nodes)
-                with open(output, "w", encoding="utf-8") as fallback_file:
-                    fallback_file.write(content)
-                logger.info(
-                    f"V2ray 转换器输出为空，已使用兼容协议链接兜底："
-                    f"生成={safety.artifact_count(content, 'v2ray')}，"
-                    f"不支持协议数={sum(skipped.values())}；不输出凭据"
-                )
-
-            if t[2] in ("clash", "surge", "singbox"):
-                stage = "逐节点协议适配"
-                from protocol_coverage import reconcile
-                content, coverage = reconcile(t[2], content, nodes)
-                unsupported = ", ".join(f"{k}:{v}" for k, v in sorted(coverage["unsupported"].items())) or "无"
-                failed_nodes = ", ".join(f"{k}:{v}" for k, v in sorted(coverage["failed"].items())) or "无"
-                protocol_counts = ", ".join(
-                    f"{kind}={counts['found']}/{counts['expected']}"
-                    for kind, counts in sorted(coverage["by_protocol"].items()))
-                logger.info(
-                    f"协议核对[{t[2]}]：来源={coverage['expected']}，已导出={coverage['found']}，"
-                    f"补回={coverage['restored']}，跳过={coverage['skipped']}，"
-                    f"不兼容={unsupported}，适配失败={failed_nodes}；各协议：{protocol_counts}"
-                )
-
-            stage = "校验订阅"
-            safety.artifact_count(content, t[2])
-            extra = {}
-            if t[2] == "surge":
-                stage = "生成 Surge 外部代理列表"
-                from surge_provider import proxy_lines_only
-                provider_content = proxy_lines_only(content)
-                safety.artifact_count(provider_content, "surge")
-                provider_name = "surge-proxy.conf"
-                provider_path = os.path.join(PATH, "subconverter", provider_name)
-                with open(provider_path, "w", encoding="utf-8") as provider_file:
-                    provider_file.write(provider_content)
-                extra[provider_name] = ("surge", provider_content, provider_path)
-
-            stage = "写入已校验配置"
-            with open(output, "w", encoding="utf-8") as verified_file:
-                verified_file.write(content)
-            # Commit the pair of Surge resources together only once both pass.
-            artifacts[t[1]] = (t[2], content)
-            records[t[1]] = output
-            for name, (kind, data, path) in extra.items():
-                artifacts[name] = (kind, data)
-                records[name] = path
-        except Exception as exc:
-            # Exception text may contain node credentials or upstream URLs.
-            # Record only a safe stage and exception type.
-            failed_formats[t[2]] = f"{stage}/{type(exc).__name__}"
-            logger.warning(f"订阅[{t[2]}]本轮未更新（{failed_formats[t[2]]}），"
-                           "Gist 旧版保持不变（若存在）；其他格式继续")
-            for cleanup in (output, os.path.join(PATH, "subconverter", "surge-proxy.conf") if t[2] == "surge" else ""):
-                if cleanup and os.path.isfile(cleanup):
-                    try:
-                        os.remove(cleanup)
-                    except OSError:
-                        pass
+        success = subconverter.generate_conf(generate_conf, t[0], source, t[1], t[2], None if getattr(args, 'geo_rename', False) else True, t[3], t[4])
+        if not success:
+            logger.error(f"cannot generate subconverter config file for target: {t[2]}")
             continue
 
-    if not artifacts:
-        raise safety.PublicationError("all subscription formats failed; keeping previous Gist publication")
-    if failed_formats:
-        logger.warning("本轮保留旧版的订阅格式：" + "、".join(sorted(failed_formats)))
-    # Keep the old successful-run cleanup: the temporary source contains
-    # credentials and must not linger after the converted artifacts are ready.
-    if os.path.isfile(supplier):
+        if subconverter.convert(binname=subconverter_bin, artifact=t[0]):
+            filepath = os.path.join(DATA_BASE, t[1])
+            shutil.move(os.path.join(PATH, "subconverter", t[1]), filepath)
+
+            records[t[1]] = filepath
+
+    # Minimal output extension: preserve a pure proxy policy-path alongside
+    # upstream's normal Surge profile. No independent conversion engine.
+    if 'surge.conf' in records:
+        from surge_provider import proxy_lines_only
         try:
-            os.remove(supplier)
-        except OSError:
-            logger.warning("临时节点输入文件清理失败，继续发布已校验订阅")
+            with open(records['surge.conf'], 'r', encoding='utf-8') as surge_source:
+                provider_content = proxy_lines_only(surge_source.read())
+            provider_path = os.path.join(DATA_BASE, 'surge-proxy.conf')
+            with open(provider_path, 'w', encoding='utf-8') as provider_file:
+                provider_file.write(provider_content)
+            records['surge-proxy.conf'] = provider_path
+            logger.info('Surge 外部代理节点列表已生成：surge-proxy.conf')
+        except (OSError, ValueError):
+            # Keep the last two published Surge artifacts unchanged together.
+            records.pop('surge.conf', None)
+            logger.warning('Surge 外部代理节点列表生成失败；本轮跳过 Surge 两份文件')
+
+    if len(records) > 0:
+        os.remove(supplier)
+    else:
+        logger.error(f"all targets convert failed, you can view the temporary file: {supplier}")
+        sys.exit(1)
 
     logger.info(f"found {len(nodes)} proxies, save it to {list(records.values())}")
 
@@ -598,40 +394,35 @@ def aggregate(args: argparse.Namespace) -> None:
         total = len(urls)
 
         # 筛选出为符合要求的订阅
-        urls = [link for link, result in zip(new_subscriptions, results) if result and result[0] and not result[1]]
+        urls = [new_subscriptions[i] for i in range(len(new_subscriptions)) if results[i][0] and not results[i][1]]
         discard = len(tasks) - len(urls)
 
         # 合并新老订阅
-        urls.extend(old_subscriptions & subscriptions)
+        urls.extend(list(old_subscriptions))
 
         logger.info(f"filter subscriptions finished, total: {total}, found: {len(urls)}, discard: {discard}")
 
-    safety.check_publication(artifacts, previous, urls, allow_public_only=bool(
-        getattr(args, "public_sources", False) and nodes))
+    utils.write_file(filename=os.path.join(DATA_BASE, subscribes_file), lines=urls)
+    domains = [utils.extract_domain(url=x, include_protocal=True) for x in urls]
+
+    # 保存实际可使用的网站列表
+    utils.write_file(filename=os.path.join(DATA_BASE, "valid-domains.txt"), lines=list(set(domains)))
+
     # 如有必要，上传至 Gist
     if gist_id and access_token:
-        item = StorageItem(gist_id=gist_id, filename=list(records.keys())[0])
-        files = {name: {"content": content, "filename": name}
-                 for name, (_, content) in artifacts.items()}
+        files, item = {}, StorageItem(gist_id=gist_id, filename=list(records.keys())[0])
+
+        for k, v in records.items():
+            if os.path.exists(v) and os.path.isfile(v):
+                with open(v, "r", encoding="utf8") as f:
+                    lines = utils.trim(f.read())
+                    if lines:
+                        files[k] = {"content": lines, "filename": k}
 
         if urls:
             files[subscribes_file] = {"content": "\n".join(urls), "filename": subscribes_file}
-        if publish_stage:
-            files[node_pool.POOL_FILE] = {"content": node_pool.encode_pool(nodes),
-                                          "filename": node_pool.POOL_FILE}
-            if staged_rotation:
-                files["refresh-rotation.json"] = {"content": staged_rotation,
-                                                   "filename": "refresh-rotation.json"}
+
         if files:
-            current_revision, current_files = safety.read_gist(gist_id, access_token)
-            if current_revision != revision:
-                # Metadata-only Refresh updates are not publication conflicts.
-                # Use the same Gist snapshot; avoid a redundant network request.
-                def public_only(files):
-                    return {k: v for k, v in files.items()
-                            if k not in {"refresh-rotation.json", "collector-state.json"}}
-                if public_only(current_files) != public_only(previous):
-                    raise safety.PublicationError("gist publication changed during collection; keeping newer version")
             push_client = push.PushToGist(token=access_token)
 
             # 上传
@@ -639,13 +430,7 @@ def aggregate(args: argparse.Namespace) -> None:
             if success:
                 logger.info(f"upload proxies and subscriptions to gist successed")
             else:
-                raise safety.PublicationError("upload failed; local subscriptions were not replaced")
-
-    for filename, source_path in records.items():
-        shutil.move(source_path, os.path.join(DATA_BASE, filename))
-    utils.write_file(filename=os.path.join(DATA_BASE, subscribes_file), lines=sorted(set(urls)))
-    domains = [utils.extract_domain(url=x, include_protocal=True) for x in urls]
-    utils.write_file(filename=os.path.join(DATA_BASE, "valid-domains.txt"), lines=sorted(set(domains)))
+                logger.error(f"upload proxies and subscriptions to gist failed")
 
     # 清理工作空间
     workflow.cleanup(workspace, [])
@@ -787,8 +572,13 @@ if __name__ == "__main__":
         "--pages",
         type=int,
         required=False,
-        default=50,
+        default=sys.maxsize,
         help="max page number when crawling telegram",
+    )
+
+    parser.add_argument(
+        "--geo-rename", action="store_true", default=False,
+        help="confirm egress country, add flags and sort nodes",
     )
 
     parser.add_argument(
@@ -797,7 +587,7 @@ if __name__ == "__main__":
         dest="refresh",
         action="store_true",
         default=False,
-        help="refresh old subscriptions and rotate newly discovered airports",
+        help="refresh and remove expired proxies with existing subscriptions",
     )
 
     parser.add_argument(
@@ -845,23 +635,4 @@ if __name__ == "__main__":
         help="the url to the list of airports that you maintain yourself",
     )
 
-    parser.add_argument(
-        '--public-sources', action='store_true', default=False,
-        help='collect additional reviewed public YAML feeds on Collect/Refresh',
-    )
-
-    parser.add_argument("--geo-rename", action="store_true", help="identify egress location and sort nodes")
-    parser.add_argument("--max-candidates", type=int, default=100, help="maximum new airports per collection")
-    parser.add_argument("--probe-sample", type=int, default=0, help="advisory public TCP endpoint sample; never removes nodes")
-    parser.add_argument("--stage-output", default="", help="save candidate nodes for publishing")
-    parser.add_argument("--publish-stage", default="", help="recheck and publish staged nodes plus latest Gist pool")
-    args = parser.parse_args()
-    if args.stage_output and args.publish_stage:
-        parser.error("--stage-output and --publish-stage cannot be combined")
-    if args.max_candidates < 0 or args.probe_sample < 0:
-        parser.error("max-candidates must be nonnegative (0 means full collection)")
-    try:
-        aggregate(args=args)
-    except safety.PublicationError as exc:
-        logger.error(str(exc))
-        sys.exit(1)
+    aggregate(args=parser.parse_args())

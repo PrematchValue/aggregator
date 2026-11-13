@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import gzip
-import hashlib
-import os
-from datetime import date
 import itertools
 import json
 import random
@@ -36,8 +33,6 @@ class CollectOptions:
     delimiter: str = ""
     allow_gmail_alias: bool = False
     skip_captcha: bool = False
-    max_candidates: int = 0
-    exclude_hosts: tuple[str, ...] = ()
 
 
 @dataclass
@@ -47,7 +42,6 @@ class AirportRecord:
     invite_code: str = ""
     api_prefix: str = ""
     source: str = ""
-    origin_domain: str = ""  # original discovered site before backend redirect
 
     def to_line(self, delimiter: str, full: bool = False) -> str:
         delimiter = utils.trim(delimiter) or DEFAULT_DELIMITER
@@ -362,8 +356,6 @@ class CcbaoheSource(AirportSource):
                     candidates[address] = words[0] if words else ""
 
             urls = list(candidates.keys())
-            if options.max_candidates > 0:
-                urls = urls[:options.max_candidates]
             redirected = utils.multi_thread_run(
                 func=follow_redirect,
                 tasks=urls,
@@ -391,8 +383,6 @@ class YgpySource(AirportSource):
 
     def crawl(self, options: CollectOptions) -> list[AirportRecord]:
         pages = self._monthly_pages()
-        if options.max_candidates > 0:
-            pages = sorted(pages, reverse=True)[:3]
         if not pages:
             logger.warning(f"[AirPortCollector] cannot get article from url: {self.base_url}")
             return []
@@ -591,33 +581,11 @@ class AirportCollector:
     def default(cls, channel: str, page_num: int, options: CollectOptions) -> AirportCollector:
         return cls(sources=default_sources(channel, page_num), options=options)
 
-    def collect(self, rotation=None) -> dict[str, AirportRecord]:
-        """Scan all configured sources, then decide how many backends to probe."""
+    def collect(self) -> dict[str, AirportRecord]:
         discovered, persisted = self._discover()
         self._persist(persisted)
-        if rotation is not None:
-            candidates = rotation.choose(discovered, self.options.max_candidates,
-                                         excluded_hosts=self.options.exclude_hosts)
-            logger.info(f"Refresh 信息源全量发现={len(discovered)}，轮换探测={len(candidates)}")
-        else:
-            candidates, seen = {}, set(self.options.exclude_hosts)
-            if self.options.max_candidates == 0:
-                ordered = list(discovered.items())
-            else:
-                from candidate_window import window_candidates
-                ordered, _ = window_candidates(discovered, self.options.max_candidates)
-            for domain, record in ordered:
-                host = utils.extract_domain(domain, False).lower()
-                if not host or host in seen:
-                    continue
-                seen.add(host)
-                candidates[domain] = record
-                if self.options.max_candidates > 0 and len(candidates) >= self.options.max_candidates:
-                    break
-            logger.info(f"Collect 信息源全量发现={len(discovered)}，实际探测={len(candidates)}")
-        if not candidates:
-            return {}
-        return self._validate(self._resolve(candidates))
+        resolved = self._resolve(discovered)
+        return self._validate(resolved)
 
     def _discover(self) -> tuple[dict[str, AirportRecord], dict[str, AirportRecord]]:
         discovered: dict[str, AirportRecord] = {}
@@ -667,15 +635,11 @@ class AirportCollector:
                     coupon=origin.coupon,
                     invite_code=origin.invite_code,
                     source=origin.source,
-                    origin_domain=origin.domain,
                 )
             )
         return resolved
 
     def _validate(self, records: list[AirportRecord]) -> dict[str, AirportRecord]:
-        # Different frontends may resolve to the same backend.
-        records = list({record.domain.rstrip('/').lower(): record for record in records
-                        if utils.extract_domain(record.domain, False).lower() not in self.options.exclude_hosts}.values())
         logger.info("[AirPortCollector] extract real base url finished, start to check it now")
         tasks = [[record.domain, self.options.allow_gmail_alias, self.options.skip_captcha] for record in records]
         results = utils.multi_thread_run(
@@ -687,7 +651,7 @@ class AirportCollector:
 
         available: dict[str, AirportRecord] = {}
         for index, record in enumerate(records):
-            accepted, api_prefix = results[index] or (False, "")
+            accepted, api_prefix = results[index]
             if not accepted:
                 continue
             record.api_prefix = api_prefix or ""
@@ -717,9 +681,6 @@ def collect_airport(
     delimiter: str = "",
     allow_gmail_alias: bool = False,
     skip_captcha: bool = False,
-    max_candidates: int = 0,
-    exclude_hosts: tuple[str, ...] = (),
-    rotation=None,
 ) -> dict[str, AirportRecord]:
     options = CollectOptions(
         num_threads=num_threads,
@@ -728,8 +689,5 @@ def collect_airport(
         delimiter=delimiter,
         allow_gmail_alias=allow_gmail_alias,
         skip_captcha=skip_captcha,
-        max_candidates=max_candidates,
-        exclude_hosts=exclude_hosts,
     )
-    collector = AirportCollector.default(channel=channel, page_num=page_num, options=options)
-    return collector.collect(rotation=rotation)
+    return AirportCollector.default(channel=channel, page_num=page_num, options=options).collect()

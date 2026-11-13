@@ -50,6 +50,14 @@ jobs:
             echo "上游代码存在冲突，未自动合并，不阻止本周 Collect" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          # Preserve customized DNS, client and routing templates during safe merges.
+          git restore --source="$BASE" --staged --worktree -- subconverter/base/all_base.tpl subconverter/pref.toml subconverter/snippets/groups.toml subconverter/snippets/rulesets.toml
+          # A merge touching only protected files has no useful local changes.
+          if git diff --cached --quiet; then
+            git merge --abort || true
+            echo "上游仅更改受保护模板，已保留 DNS／分流配置" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           if git diff --cached --name-only "$BASE" | grep -Eq '^\.github/workflows/'; then
             git merge --abort || true
             echo "上游更改工作流，需要人工审查，跳过自动合并" >> "$GITHUB_STEP_SUMMARY"

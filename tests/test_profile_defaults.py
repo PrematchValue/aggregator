@@ -49,8 +49,12 @@ class ProfileAndScheduleTests(unittest.TestCase):
         yml = (ROOT/'.github/workflows/refresh.yaml').read_text(encoding='utf-8')
         self.assertIn('cron: "17 */4 * * *"', yml)
         self.assertIn('cron: "47 */4 * * *"', yml)
-        self.assertIn('--max-candidates 0', yml)
-        self.assertNotIn('--max-candidates 9000', yml)
+        self.assertIn(' --geo-rename ', yml)
+        self.assertNotIn('--max-candidates', yml)
+        self.assertNotIn('--stage-output', yml)
+        self.assertNotIn('--publish-stage', yml)
+        self.assertNotIn('  publish:', yml)
+        self.assertNotIn('--refresh', yml)
         self.assertNotIn('--overwrite --refresh', yml)
         self.assertIn('timeout-minutes: 330', yml)
         self.assertIn('queue: max', yml)
@@ -59,6 +63,7 @@ class ProfileAndScheduleTests(unittest.TestCase):
         workflow = yaml.safe_load(yml)
         self.assertIn('schedule_guard', workflow['jobs'])
         self.assertEqual(workflow['jobs']['process']['needs'], 'schedule_guard')
+        self.assertEqual(set(workflow['jobs']), {'schedule_guard', 'process'})
 
     def test_weekly_workflow_only_checks_upstream(self):
         yml = (ROOT/'.github/workflows/collect.yaml').read_text(encoding='utf-8')
@@ -69,6 +74,8 @@ class ProfileAndScheduleTests(unittest.TestCase):
         self.assertEqual(list(workflow['jobs']), ['upstream'])
         self.assertNotIn('candidate-stage.json', yml)
         self.assertNotIn('GIST_PAT', yml)
+        self.assertIn('git restore --source="$BASE" --staged --worktree', yml)
+        self.assertIn('subconverter/base/all_base.tpl subconverter/pref.toml', yml)
 
 
 if __name__ == '__main__':
