@@ -237,7 +237,7 @@ value = "7891"
 
 [[template.globals]]
 key = "clash.allow_lan"
-value = "true"
+value = "false"
 
 [[template.globals]]
 key = "clash.log_level"
@@ -245,7 +245,7 @@ value = "info"
 
 [[template.globals]]
 key = "singbox.allow_lan"
-value = "true"
+value = "false"
 
 [[template.globals]]
 key = "singbox.mixed_port"

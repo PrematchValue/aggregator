@@ -2,15 +2,52 @@
 
 port: {{ default(global.clash.http_port, "7890") }}
 socks-port: {{ default(global.clash.socks_port, "7891") }}
-allow-lan: {{ default(global.clash.allow_lan, "true") }}
+allow-lan: {{ default(global.clash.allow_lan, "false") }}
 mode: Rule
 log-level: {{ default(global.clash.log_level, "info") }}
 external-controller: {{ default(global.clash.external_controller, "127.0.0.1:9090") }}
-{% if default(request.clash.dns, "") == "1" %}
+# Ready-to-use Mihomo DNS. The selected proxy group handles overseas DoH.
+# Resolve proxy server hosts directly first to avoid a DNS/proxy dependency loop.
 dns:
   enable: true
-  listen: :1053
-{% endif %}
+  listen: 127.0.0.1:1053
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter-mode: blacklist
+  fake-ip-filter:
+    - 'localhost'
+    - '+.localhost'
+    - '+.lan'
+    - '+.local'
+    - '+.home.arpa'
+    - '+.internal'
+    - 'time.apple.com'
+    - 'time.windows.com'
+    - 'pool.ntp.org'
+    - '+.pool.ntp.org'
+    - 'stun.*'
+    - 'captive.apple.com'
+    - '+.msftconnecttest.com'
+    - '+.msftncsi.com'
+    - 'connectivitycheck.gstatic.com'
+    - 'connectivitycheck.android.com'
+  default-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  proxy-server-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  direct-nameserver:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+  nameserver-policy:
+    'geosite:cn,private':
+      - https://dns.alidns.com/dns-query
+      - https://doh.pub/dns-query
+  nameserver:
+    - 'https://1.1.1.1/dns-query#🔰 节点选择'
+    - 'https://8.8.8.8/dns-query#🔰 节点选择'
 {% if local.clash.new_field_name == "true" %}
 proxies: ~
 proxy-groups: ~
@@ -26,14 +63,14 @@ Rule: ~
 
 [General]
 loglevel = notify
+ipv6 = false
 bypass-system = true
-skip-proxy = 127.0.0.1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,100.64.0.0/10,localhost,*.local,e.crashlytics.com,captive.apple.com,::ffff:0:0:0:0/1,::ffff:128:0:0:0/1
-#DNS设置或根据自己网络情况进行相应设置
-bypass-tun = 192.168.0.0/16,10.0.0.0/8,172.16.0.0/12
-dns-server = 119.29.29.29,223.5.5.5
-
-[Script]
-http-request https?:\/\/.*\.iqiyi\.com\/.*authcookie= script-path=https://raw.githubusercontent.com/NobyDa/Script/master/iQIYI-DailyBonus/iQIYI.js
+skip-proxy = localhost, *.local, *.lan, 127.0.0.1, 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12
+bypass-tun = 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12
+# Domestic encrypted DNS; no injected scripts, MITM or embedded certificates.
+dns-server = system, 223.5.5.5, 119.29.29.29
+encrypted-dns-server = https://dns.alidns.com/dns-query, https://doh.pub/dns-query
+test-timeout = 5
 
 {% endif %}
 {% if request.target == "loon" %}
@@ -269,125 +306,49 @@ enhanced-mode-by-rule = true
 {% if request.target == "singbox" %}
 
 {
-    "log": {
-        "disabled": false,
-        "level": "info",
-        "timestamp": true
-    },
-    "dns": {
-        "servers": [
-            {
-                "tag": "dns_proxy",
-                "address": "tls://1.1.1.1",
-                "address_resolver": "dns_resolver"
-            },
-            {
-                "tag": "dns_direct",
-                "address": "h3://dns.alidns.com/dns-query",
-                "address_resolver": "dns_resolver",
-                "detour": "DIRECT"
-            },
-            {
-                "tag": "dns_fakeip",
-                "address": "fakeip"
-            },
-            {
-                "tag": "dns_resolver",
-                "address": "223.5.5.5",
-                "detour": "DIRECT"
-            },
-            {
-                "tag": "block",
-                "address": "rcode://success"
-            }
-        ],
-        "rules": [
-            {
-                "outbound": [
-                    "any"
-                ],
-                "server": "dns_resolver"
-            },
-            {
-                "geosite": [
-                    "category-ads-all"
-                ],
-                "server": "dns_block",
-                "disable_cache": true
-            },
-            {
-                "geosite": [
-                    "geolocation-!cn"
-                ],
-                "query_type": [
-                    "A",
-                    "AAAA"
-                ],
-                "server": "dns_fakeip"
-            },
-            {
-                "geosite": [
-                    "geolocation-!cn"
-                ],
-                "server": "dns_proxy"
-            }
-        ],
-        "final": "dns_direct",
-        "independent_cache": true,
-        "fakeip": {
-            "enabled": true,
-            {% if default(request.singbox.ipv6, "") == "1" %}
-            "inet6_range": "fc00::\/18",
-            {% endif %}
-            "inet4_range": "198.18.0.0\/15"
-        }
-    },
-    "ntp": {
-        "enabled": true,
-        "server": "time.apple.com",
-        "server_port": 123,
-        "interval": "30m",
-        "detour": "DIRECT"
-    },
-    "inbounds": [
-        {
-            "type": "mixed",
-            "tag": "mixed-in",
-            {% if bool(default(global.singbox.allow_lan, "")) %}
-            "listen": "0.0.0.0",
-            {% else %}
-            "listen": "127.0.0.1",
-            {% endif %}
-            "listen_port": {{ default(global.singbox.mixed_port, "2080") }}
-        },
-        {
-            "type": "tun",
-            "tag": "tun-in",
-            "inet4_address": "172.19.0.1/30",
-            {% if default(request.singbox.ipv6, "") == "1" %}
-            "inet6_address": "fdfe:dcba:9876::1/126",
-            {% endif %}
-            "auto_route": true,
-            "strict_route": true,
-            "stack": "mixed",
-            "sniff": true
-        }
+  "log": {"level": "info", "timestamp": true},
+  "dns": {
+    "servers": [
+      {"type": "udp", "tag": "dns_resolver", "server": "223.5.5.5"},
+      {"type": "https", "tag": "dns_direct", "server": "dns.alidns.com", "path": "/dns-query", "domain_resolver": "dns_resolver"},
+      {"type": "https", "tag": "dns_proxy", "server": "1.1.1.1", "path": "/dns-query", "detour": "🔰 节点选择"},
+      {"type": "fakeip", "tag": "dns_fakeip", "inet4_range": "198.18.0.0/15"}
     ],
-    "outbounds": [],
-    "route": {
-        "rules": [],
-        "auto_detect_interface": true
+    "rules": [
+      {"domain_suffix": ["cn", "lan", "local", "home.arpa"], "action": "route", "server": "dns_direct"},
+      {"query_type": ["A", "AAAA"], "action": "route", "server": "dns_fakeip"}
+    ],
+    "final": "dns_proxy"
+  },
+  "inbounds": [
+    {
+      "type": "mixed", "tag": "mixed-in",
+      {% if bool(default(global.singbox.allow_lan, "")) %}
+      "listen": "0.0.0.0",
+      {% else %}
+      "listen": "127.0.0.1",
+      {% endif %}
+      "listen_port": {{ default(global.singbox.mixed_port, "2080") }}
     },
-    "experimental": {
-        "cache_file": {
-            "enabled": true,
-            "store_fakeip": true
-        },
-        "clash_api": {
-            "external_controller": "{{ default(global.clash.external_controller, "127.0.0.1:9090") }}",
-            "external_ui": "dashboard"
-        }
+    {
+      "type": "tun", "tag": "tun-in",
+      "address": ["172.19.0.1/30"],
+      "auto_route": true,
+      "strict_route": true
     }
+  ],
+  "outbounds": [],
+  "route": {
+    "rules": [],
+    "auto_detect_interface": true,
+    "default_domain_resolver": "dns_direct"
+  },
+  "experimental": {
+    "cache_file": {"enabled": true, "store_fakeip": true},
+    "clash_api": {
+      "external_controller": "{{ default(global.clash.external_controller, "127.0.0.1:9090") }}"
+    }
+  }
 }
 
 {% endif %}

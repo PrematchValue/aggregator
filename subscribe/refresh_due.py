@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""Idempotency gate for redundant GitHub schedule events.
+
+The redundant cron does not guarantee delivery; this gate skips expensive
+collection when another recent Refresh has already succeeded or is running.
+Failures are eligible for immediate retry and GitHub API errors fail open.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import json
+import os
+import urllib.request
+
+RECENT_START_SECONDS = 115 * 60
+RECENT_FINISH_SECONDS = 20 * 60
+ACTIVE = {"queued", "pending", "waiting", "in_progress", "requested"}
+
+
+def parsed_time(value):
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except (AttributeError, ValueError, TypeError):
+        return None
+
+
+def should_start(event: str, runs: list[dict], current_id: int, now=None) -> tuple[bool, str]:
+    if event != "schedule":
+        return True, "manual trigger always executes"
+    now = now or datetime.now(timezone.utc)
+    for entry in runs:
+        if not isinstance(entry, dict) or entry.get("id") == current_id:
+            continue
+        if entry.get("head_branch") != "main" or entry.get("event") not in {"schedule", "workflow_dispatch"}:
+            continue
+        created, finished = parsed_time(entry.get("created_at")), parsed_time(entry.get("updated_at"))
+        status, conclusion = entry.get("status"), entry.get("conclusion")
+        if not created:
+            continue
+        age = (now - created).total_seconds()
+        if age < 0:
+            continue
+        if status in ACTIVE and age < RECENT_START_SECONDS:
+            return False, f"Refresh {entry.get('id')} recently started and is still active"
+        if conclusion == "success" and (
+            age < RECENT_START_SECONDS or
+            (finished is not None and 0 <= (now - finished).total_seconds() < RECENT_FINISH_SECONDS)
+        ):
+            return False, f"Refresh {entry.get('id')} already succeeded recently"
+    return True, "no recent successful or active Refresh"
+
+
+def main():
+    event = os.environ.get("GITHUB_EVENT_NAME", "")
+    due, why = True, "manual trigger"
+    if event == "schedule":
+        try:
+            repo = os.environ["GITHUB_REPOSITORY"]
+            token = os.environ["GH_TOKEN"]
+            run_id = int(os.environ["GITHUB_RUN_ID"])
+            url = f"https://api.github.com/repos/{repo}/actions/workflows/refresh.yaml/runs?per_page=100"
+            req = urllib.request.Request(url, headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {token}",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "aggregator-refresh-gate",
+            })
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                runs = json.load(resp).get("workflow_runs", [])
+            if not isinstance(runs, list):
+                raise ValueError("invalid GitHub runs response")
+            due, why = should_start(event, runs, run_id)
+        except (OSError, KeyError, ValueError, TypeError) as exc:
+            # Prioritize uptime: a failed status query must not suppress collection.
+            due, why = True, f"GitHub status unavailable ({type(exc).__name__}); fail open"
+    value = "true" if due else "false"
+    print(f"Refresh trigger: {'RUN' if due else 'SKIP'}; {why}")
+    output = os.environ.get("GITHUB_OUTPUT")
+    if output:
+        with open(output, "a", encoding="utf-8") as handle:
+            handle.write(f"run_refresh={value}\n")
+
+
+if __name__ == "__main__":
+    main()
