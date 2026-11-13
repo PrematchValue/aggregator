@@ -478,79 +478,107 @@ def aggregate(args: argparse.Namespace) -> None:
         list_only = False if target == "v2ray" or target == "mixed" or "ss" in target else not args.all
         targets.append((convert_name, filename, target, list_only, args.ignore_default_filters))
 
-    artifacts = {}
+    # A malformed node or unsupported target format must not spoil the current
+    # node pool or the other subscriptions. Failed formats are omitted from the
+    # Gist PATCH, which leaves their prior published files untouched.
+    artifacts, records, failed_formats = {}, {}, {}
     for t in targets:
         output = os.path.join(PATH, "subconverter", t[1])
-        if os.path.isfile(output):
-            os.remove(output)
-        success = subconverter.generate_conf(generate_conf, t[0], source, t[1], t[2], None if getattr(args, 'geo_rename', False) else True, t[3], t[4])
-        if not success:
-            raise safety.PublicationError(f"cannot generate conversion config: {t[2]}")
-
-        if not subconverter.convert(binname=subconverter_bin, artifact=t[0]) or not os.path.isfile(output):
-            raise safety.PublicationError(f"conversion failed: {t[2]}; keeping previous publication")
-        with open(output, encoding="utf-8") as handle:
-            content = handle.read()
-        if t[2] == "v2ray" and not content.strip():
-            # The legacy SubConverter can report success while producing an
-            # empty v2rayN artifact for newer protocols (e.g. Hysteria2/TUIC).
-            # Fallback only for this one format, and only from the SAME set of
-            # country-confirmed nodes used in all other formats.
-            from v2ray_fallback import build_subscription
-
-            try:
-                content, skipped = build_subscription(nodes)
-            except ValueError:
-                raise safety.PublicationError(
-                    "v2ray converter returned empty and no compatible URI can be built; "
-                    "keeping previous Gist publication"
-                ) from None
-            with open(output, "w", encoding="utf-8") as fallback_file:
-                fallback_file.write(content)
-            logger.info(
-                f"V2ray 转换器输出为空，已使用兼容协议链接兜底："
-                f"生成={safety.artifact_count(content, 'v2ray')}，"
-                f"不支持协议数={sum(skipped.values())}；不输出凭据"
+        stage = "准备转换"
+        try:
+            if os.path.isfile(output):
+                os.remove(output)
+            stage = "生成转换配置"
+            success = subconverter.generate_conf(
+                generate_conf, t[0], source, t[1], t[2],
+                None if getattr(args, 'geo_rename', False) else True, t[3], t[4]
             )
-        # Cross-format coverage: preserve all confirmed, representable nodes.
-        # This runs only on the short publication phase in normal workflows.
-        if t[2] in ("clash", "surge", "singbox"):
-            from protocol_coverage import CoverageError, reconcile
-            try:
+            if not success:
+                raise safety.PublicationError("converter configuration unavailable")
+
+            stage = "转换订阅"
+            if not subconverter.convert(binname=subconverter_bin, artifact=t[0]) or not os.path.isfile(output):
+                raise safety.PublicationError("converter output unavailable")
+            with open(output, encoding="utf-8") as handle:
+                content = handle.read()
+
+            if t[2] == "v2ray" and not content.strip():
+                stage = "恢复 V2Ray 链接"
+                # Preserve the existing URI fallback. Failure of this one
+                # format cannot block Clash/Surge/Sing-box publication.
+                from v2ray_fallback import build_subscription
+                content, skipped = build_subscription(nodes)
+                with open(output, "w", encoding="utf-8") as fallback_file:
+                    fallback_file.write(content)
+                logger.info(
+                    f"V2ray 转换器输出为空，已使用兼容协议链接兜底："
+                    f"生成={safety.artifact_count(content, 'v2ray')}，"
+                    f"不支持协议数={sum(skipped.values())}；不输出凭据"
+                )
+
+            if t[2] in ("clash", "surge", "singbox"):
+                stage = "逐节点协议适配"
+                from protocol_coverage import reconcile
                 content, coverage = reconcile(t[2], content, nodes)
-            except CoverageError as exc:
-                raise safety.PublicationError(str(exc)) from None
+                unsupported = ", ".join(f"{k}:{v}" for k, v in sorted(coverage["unsupported"].items())) or "无"
+                failed_nodes = ", ".join(f"{k}:{v}" for k, v in sorted(coverage["failed"].items())) or "无"
+                protocol_counts = ", ".join(
+                    f"{kind}={counts['found']}/{counts['expected']}"
+                    for kind, counts in sorted(coverage["by_protocol"].items()))
+                logger.info(
+                    f"协议核对[{t[2]}]：来源={coverage['expected']}，已导出={coverage['found']}，"
+                    f"补回={coverage['restored']}，跳过={coverage['skipped']}，"
+                    f"不兼容={unsupported}，适配失败={failed_nodes}；各协议：{protocol_counts}"
+                )
+
+            stage = "校验订阅"
+            safety.artifact_count(content, t[2])
+            extra = {}
+            if t[2] == "surge":
+                stage = "生成 Surge 外部代理列表"
+                from surge_provider import proxy_lines_only
+                provider_content = proxy_lines_only(content)
+                safety.artifact_count(provider_content, "surge")
+                provider_name = "surge-proxy.conf"
+                provider_path = os.path.join(PATH, "subconverter", provider_name)
+                with open(provider_path, "w", encoding="utf-8") as provider_file:
+                    provider_file.write(provider_content)
+                extra[provider_name] = ("surge", provider_content, provider_path)
+
+            stage = "写入已校验配置"
             with open(output, "w", encoding="utf-8") as verified_file:
                 verified_file.write(content)
-            missing_types = ", ".join(f"{k}:{v}" for k, v in sorted(coverage["unsupported"].items())) or "无"
-            protocol_counts = ", ".join(
-                f"{kind}={counts['found']}/{counts['expected']}"
-                for kind, counts in sorted(coverage["by_protocol"].items()))
-            logger.info(f"协议核对[{t[2]}]：应导出={coverage['expected']}，已导出={coverage['found']}，"
-                        f"补回={coverage['restored']}，不兼容={missing_types}；各协议：{protocol_counts}")
-        safety.artifact_count(content, t[2])
-        artifacts[t[1]] = (t[2], content)
-        records[t[1]] = output
-        if t[2] == "surge":
-            # Preserve the full surge.conf for direct import. The policy-path
-            # resource must contain only real proxy declarations, not DIRECT,
-            # GLOBAL-DIRECT, policy groups or [Rule] entries.
-            from surge_provider import proxy_lines_only
+            # Commit the pair of Surge resources together only once both pass.
+            artifacts[t[1]] = (t[2], content)
+            records[t[1]] = output
+            for name, (kind, data, path) in extra.items():
+                artifacts[name] = (kind, data)
+                records[name] = path
+        except Exception as exc:
+            # Exception text may contain node credentials or upstream URLs.
+            # Record only a safe stage and exception type.
+            failed_formats[t[2]] = f"{stage}/{type(exc).__name__}"
+            logger.warning(f"订阅[{t[2]}]本轮未更新（{failed_formats[t[2]]}），"
+                           "Gist 旧版保持不变（若存在）；其他格式继续")
+            for cleanup in (output, os.path.join(PATH, "subconverter", "surge-proxy.conf") if t[2] == "surge" else ""):
+                if cleanup and os.path.isfile(cleanup):
+                    try:
+                        os.remove(cleanup)
+                    except OSError:
+                        pass
+            continue
 
-            provider_content = proxy_lines_only(content)
-            safety.artifact_count(provider_content, "surge")
-            provider_name = "surge-proxy.conf"
-            provider_path = os.path.join(PATH, "subconverter", provider_name)
-            with open(provider_path, "w", encoding="utf-8") as provider_file:
-                provider_file.write(provider_content)
-            artifacts[provider_name] = ("surge", provider_content)
-            records[provider_name] = provider_path
-
-    if len(records) > 0:
-        os.remove(supplier)
-    else:
-        logger.error(f"all targets convert failed, you can view the temporary file: {supplier}")
-        sys.exit(1)
+    if not artifacts:
+        raise safety.PublicationError("all subscription formats failed; keeping previous Gist publication")
+    if failed_formats:
+        logger.warning("本轮保留旧版的订阅格式：" + "、".join(sorted(failed_formats)))
+    # Keep the old successful-run cleanup: the temporary source contains
+    # credentials and must not linger after the converted artifacts are ready.
+    if os.path.isfile(supplier):
+        try:
+            os.remove(supplier)
+        except OSError:
+            logger.warning("临时节点输入文件清理失败，继续发布已校验订阅")
 
     logger.info(f"found {len(nodes)} proxies, save it to {list(records.values())}")
 

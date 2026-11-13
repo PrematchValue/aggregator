@@ -184,7 +184,7 @@ class AggregateTests(unittest.TestCase):
         # separately in tests/test_protocol_coverage.py.
         p = patch("protocol_coverage.reconcile", side_effect=lambda target, content, nodes:
                   (content, {"expected": len(nodes), "found": len(nodes),
-                             "restored": 0, "unsupported": {}, "by_protocol": {}}))
+                             "restored": 0, "unsupported": {}, "failed": {}, "skipped": 0, "by_protocol": {}}))
         p.start()
         self.addCleanup(p.stop)
         self.mocks["push.PushToGist"].return_value.push_to.return_value = True
@@ -305,7 +305,7 @@ class AggregateTests(unittest.TestCase):
         self.assertEqual(safety.artifact_count(encoded, "v2ray"), 1)
         self.assertIn("surge-proxy.conf", payload["files"])
 
-    def test_empty_v2ray_no_safe_fallback_blocks_publication(self):
+    def test_empty_v2ray_fallback_does_not_block_other_formats(self):
         def partial_converter(binname, artifact):
             if artifact == "convert_v2ray":
                 (self.root / "subconverter" / "v2ray.txt").write_text("", encoding="utf-8")
@@ -313,9 +313,11 @@ class AggregateTests(unittest.TestCase):
             return self.convert(binname, artifact)
         self.mocks["subconverter.convert"].side_effect = partial_converter
         with patch("v2ray_fallback.build_subscription", side_effect=ValueError("unsupported type")):
-            with self.assertRaises(safety.PublicationError):
-                collect.aggregate(self.args)
-        self.assert_no_publish()
+            collect.aggregate(self.args)
+        published = self.mocks["push.PushToGist"].return_value.push_to.call_args.kwargs["payload"]["files"]
+        self.assertNotIn("v2ray.txt", published)
+        self.assertIn("clash.yaml", published)
+        self.assertIn("surge.conf", published)
 
     def test_unreadable_baseline_aborts_before_collection(self):
         self.mocks["safety.read_gist"].side_effect = safety.PublicationError("baseline unavailable")
@@ -324,8 +326,53 @@ class AggregateTests(unittest.TestCase):
         self.mocks["assign"].assert_not_called()
         self.assert_no_publish()
 
-    def test_partial_conversion_never_publishes(self):
+    def test_partial_conversion_publishes_healthy_formats(self):
         self.mocks["subconverter.convert"].side_effect = lambda binname, artifact: self.convert(binname, artifact) if artifact == "convert_clash" else False
+        collect.aggregate(self.args)
+        payload = self.mocks["push.PushToGist"].return_value.push_to.call_args.kwargs["payload"]["files"]
+        self.assertIn("clash.yaml", payload)
+        self.assertNotIn("surge.conf", payload)
+        self.assertNotIn("singbox.json", payload)
+        self.assertNotIn("v2ray.txt", payload)
+
+    def test_surge_failure_preserves_both_old_files_and_publishes_node_pool(self):
+        import node_pool
+        stage_file = self.root / "candidate-stage.json"
+        node_pool.write_stage(str(stage_file), [node(4)], {"https://new.example/sub"})
+        self.args.publish_stage = str(stage_file)
+        self.files["surge.conf"] = "old complete profile"
+        self.files["surge-proxy.conf"] = "old policy list"
+        self.mocks["subconverter.convert"].side_effect = lambda binname, artifact: False if artifact == "convert_surge" else self.convert(binname, artifact)
+        collect.aggregate(self.args)
+        payload = self.mocks["push.PushToGist"].return_value.push_to.call_args.kwargs["payload"]["files"]
+        self.assertIn("clash.yaml", payload)
+        self.assertIn("node-pool.json", payload)
+        self.assertNotIn("surge.conf", payload)
+        self.assertNotIn("surge-proxy.conf", payload)
+
+    def test_surge_provider_failure_preserves_both_old_files(self):
+        with patch("surge_provider.proxy_lines_only", side_effect=ValueError("bad one format")):
+            collect.aggregate(self.args)
+        payload = self.mocks["push.PushToGist"].return_value.push_to.call_args.kwargs["payload"]["files"]
+        self.assertIn("clash.yaml", payload)
+        self.assertNotIn("surge.conf", payload)
+        self.assertNotIn("surge-proxy.conf", payload)
+
+    def test_invalid_singbox_artifact_only_skips_singbox(self):
+        def partial(binname, artifact):
+            result = self.convert(binname, artifact)
+            if artifact == "convert_singbox":
+                (self.root / "subconverter" / "singbox.json").write_text("{invalid", encoding="utf-8")
+            return result
+        self.mocks["subconverter.convert"].side_effect = partial
+        collect.aggregate(self.args)
+        payload = self.mocks["push.PushToGist"].return_value.push_to.call_args.kwargs["payload"]["files"]
+        self.assertNotIn("singbox.json", payload)
+        self.assertIn("surge.conf", payload)
+        self.assertIn("clash.yaml", payload)
+
+    def test_all_formats_failed_never_updates_gist(self):
+        self.mocks["subconverter.convert"].side_effect = lambda **kwargs: False
         with self.assertRaises(safety.PublicationError):
             collect.aggregate(self.args)
         self.assert_no_publish()

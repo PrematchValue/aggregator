@@ -32,7 +32,7 @@ class CoverageTests(unittest.TestCase):
         self.assertIn("🇯🇵 日本 001", output.split("[Proxy Group]")[1])
         self.assertEqual(counts["restored"], 2)
         self.assertEqual(counts["found"], 2)
-        self.assertEqual(counts["by_protocol"]["vless"], {"expected": 1, "found": 1})
+        self.assertEqual(counts["by_protocol"]["vless"], {"expected": 1, "found": 1, "skipped": 0})
         self.assertEqual(len(_surge_names(output)), 2)
         self.assertNotIn("test-secret", repr(counts))
 
@@ -45,20 +45,28 @@ class CoverageTests(unittest.TestCase):
         self.assertIn("grpc-service-name=api", out)
         self.assertIn("grpc=true", out)
 
-    def test_unrepresentable_known_protocol_blocks(self):
-        node = make_node("Bad VLESS", network="xhttp")
-        with self.assertRaisesRegex(CoverageError, "vless:1"):
-            reconcile("surge", "[Proxy]\n", [node])
-        node = make_node("AnyTLS Special", "anytls", **{"shadow-tls-opts": {"host": "abc"}})
-        with self.assertRaisesRegex(CoverageError, "anytls:1"):
-            reconcile("singbox", '{"outbounds": []}', [node])
+    def test_unrepresentable_known_protocol_is_skipped_individually(self):
+        bad = make_node("Bad VLESS", network="xhttp")
+        good = make_node("Good Trojan", "trojan")
+        output, stats = reconcile("surge", "[Proxy]\n", [bad, good])
+        self.assertIn("Good Trojan = trojan", output)
+        self.assertNotIn("Bad VLESS =", output)
+        self.assertEqual(stats["failed"], {"vless": 1})
+        self.assertEqual(stats["skipped"], 1)
+        special = make_node("AnyTLS Special", "anytls", **{"shadow-tls-opts": {"host": "abc"}})
+        recovered, counts = reconcile("singbox", '{"outbounds": []}', [special, good])
+        self.assertEqual(counts["failed"], {"anytls": 1})
+        self.assertEqual(counts["skipped"], 1)
+        self.assertIn("Good Trojan", recovered)
+        self.assertNotIn("AnyTLS Special", recovered)
 
     def test_explicitly_incompatible_protocol_does_not_fail(self):
         out, stat = reconcile("surge", "[Proxy]\nKnown = trojan, a, 443, password=x\n",
                               [make_node("Known", "trojan"), make_node("SSR", "ssr")])
         self.assertEqual(out.count("Known ="), 1)
         self.assertEqual(stat["unsupported"], {"ssr": 1})
-        self.assertEqual(stat["expected"], 1)
+        self.assertEqual(stat["expected"], 2)
+        self.assertEqual(stat["skipped"], 1)
 
     def test_singbox_restore_vless_anytls_and_group(self):
         doc = {"outbounds": [{"type": "selector", "tag": "🔰 节点选择", "outbounds": ["direct"]},
@@ -91,10 +99,49 @@ class CoverageTests(unittest.TestCase):
         self.assertEqual(out, content)
         self.assertEqual(stats["restored"], 0)
 
-    def test_existing_node_with_wrong_protocol_is_rejected(self):
-        with self.assertRaisesRegex(CoverageError, "mismatch"):
-            reconcile("surge", "[Proxy]\nNode = trojan, host, 443, password=x\n",
-                      [make_node("Node", "vless")])
+    def test_existing_node_with_wrong_protocol_is_repaired(self):
+        output, stats = reconcile("surge", "[Proxy]\nNode = trojan, host, 443, password=x\n",
+                                  [make_node("Node", "vless")])
+        self.assertNotIn("trojan, host", output)
+        self.assertIn("Node = vless", output)
+        self.assertEqual(stats["restored"], 1)
+
+    def test_mismatched_unconvertible_node_removed_but_good_nodes_remain(self):
+        bad = make_node("Bad", "vless", network="xhttp")
+        good = make_node("Good", "trojan")
+        profile = ("[Proxy]\nBad = trojan, old.example, 443, password=x\n"
+                   "Good = trojan, example.net, 443, password=test-secret\n"
+                   "[Proxy Group]\n🔰 节点选择 = select, Bad, Good, DIRECT\n")
+        output, stats = reconcile("surge", profile, [bad, good])
+        self.assertNotIn("Bad =", output)
+        self.assertNotIn("select, Bad,", output)
+        self.assertIn("Good = trojan", output)
+        self.assertEqual(stats["skipped"], 1)
+        self.assertEqual(stats["failed"], {"vless": 1})
+
+    def test_clash_wrong_protocol_is_repaired_with_group_link(self):
+        bad = make_node("A", "vless")
+        baseline = {"proxies": [make_node("A", "trojan")], "proxy-groups": [
+                    {"type": "select", "name": "🔰 节点选择", "proxies": ["DIRECT", "A"]}]}
+        output, stats = reconcile("clash", yaml.safe_dump(baseline, allow_unicode=True), [bad])
+        parsed = yaml.safe_load(output)
+        self.assertEqual(len(parsed["proxies"]), 1)
+        self.assertEqual(parsed["proxies"][0]["type"], "vless")
+        self.assertEqual(parsed["proxy-groups"][0]["proxies"].count("A"), 1)
+        self.assertEqual(stats["skipped"], 0)
+
+    def test_singbox_bad_node_removed_from_groups(self):
+        bad = make_node("Bad", "vless", network="xhttp")
+        good = make_node("Good", "trojan")
+        profile = {"outbounds": [
+            {"type": "selector", "tag": "🔰 节点选择", "outbounds": ["Bad", "Good", "direct"]},
+            {"type": "trojan", "tag": "Bad", "server": "a", "server_port": 443, "password": "x"},
+            {"type": "trojan", "tag": "Good", "server": "b", "server_port": 443, "password": "x"}]}
+        output, stats = reconcile("singbox", json.dumps(profile), [bad, good])
+        parsed = json.loads(output)
+        self.assertNotIn("Bad", parsed["outbounds"][0]["outbounds"])
+        self.assertEqual([v["tag"] for v in parsed["outbounds"] if v["type"] == "trojan"], ["Good"])
+        self.assertEqual(stats["skipped"], 1)
 
     def test_surge_external_policy_list_keeps_modern_protocols(self):
         try:

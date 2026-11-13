@@ -99,7 +99,7 @@ class PushTo(object):
                     except Exception:
                         message = "cannot read error messgae from response"
                     logger.error(
-                        f"[PushError] request failed, code: {code}, url: {url}, message: {message}, data: {data}"
+                        f"[PushError] request failed, code: {code}, url: {url}; response details withheld"
                     )
             except Exception:
                 logger.error(f"[PushError] failed to process exception: {traceback.format_exc()}")
@@ -108,7 +108,7 @@ class PushTo(object):
 
             retry -= 1
             if retry > 0:
-                return self.push_to(content, item, group, retry)
+                return self.push_to(content, item, group, retry, **kwargs)
 
             return False
 

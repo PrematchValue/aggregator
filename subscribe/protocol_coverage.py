@@ -388,101 +388,171 @@ def _update_groups(groups, names, *, clash=False):
                 members.append(name)
 
 
-def reconcile(target, content, nodes):
-    """Return (complete artifact, counts).
+def _remove_bad_entries(target, data, bad_names):
+    """Discard malformed protocol mappings, including dangling group references."""
+    if not bad_names:
+        return data
+    if target == "clash":
+        data["proxies"] = [p for p in data["proxies"]
+                           if not isinstance(p, dict) or _name(p).casefold() not in bad_names]
+        for group in data.get("proxy-groups", []):
+            if isinstance(group, dict) and isinstance(group.get("proxies"), list):
+                group["proxies"] = [n for n in group["proxies"]
+                                    if str(n).strip().casefold() not in bad_names]
+        return data
+    if target == "singbox":
+        data["outbounds"] = [p for p in data["outbounds"]
+                             if not isinstance(p, dict) or str(p.get("tag", "")).strip().casefold() not in bad_names]
+        for group in data["outbounds"]:
+            if isinstance(group, dict) and isinstance(group.get("outbounds"), list):
+                group["outbounds"] = [n for n in group["outbounds"]
+                                      if str(n).strip().casefold() not in bad_names]
+        return data
+    # Surge: edit only [Proxy] declarations. Policy group definitions can have
+    # positional members plus option assignments; remove *exact* node names.
+    rows = []
+    section = "proxy" if not any(SECTION.fullmatch(row.strip()) for row in data.splitlines()) else ""
+    for line in data.splitlines():
+        match = SECTION.fullmatch(line.strip())
+        if match:
+            section = match.group(1).strip().lower()
+            rows.append(line)
+            continue
+        if section == "proxy":
+            match = SURGE_LINE.fullmatch(line.strip())
+            if match and match.group(1).strip().casefold() in bad_names:
+                continue
+        elif section == "proxy group" and "=" in line:
+            name, value = line.split("=", 1)
+            # Commas in values are structural delimiters of Surge groups.
+            # We remove only complete positional fields, never options.
+            parts = value.split(",")
+            value = ",".join(p for p in parts if p.strip().casefold() not in bad_names)
+            line = name + "=" + value
+        rows.append(line)
+    return "\n".join(rows).rstrip() + "\n"
 
-    Never compare to the *previous publication*; a smaller new set is valid.
-    Compare only the current, already verified source against its own output.
-    Diagnostics contain only aggregate protocol counts, no sensitive endpoints.
+
+def _output_names(target, content):
+    if target == "clash":
+        return {_name(n).casefold() for n in yaml.safe_load(content)["proxies"]
+                if isinstance(n, dict) and _name(n)}
+    if target == "singbox":
+        return {str(n.get("tag", "")).strip().casefold()
+                for n in json.loads(content)["outbounds"] if isinstance(n, dict) and n.get("tag")}
+    return _surge_names(content)
+
+
+def _expected_type(target, node):
+    kind = str(node.get("type", "")).lower()
+    if target == "singbox":
+        return {"ss": "shadowsocks", "socks5": "socks"}.get(kind, kind)
+    if target == "surge":
+        if kind == "tuic":
+            return "tuic" if node.get("token") else "tuic-v5"
+        if kind == "http" and node.get("tls"):
+            return "https"
+        if kind == "socks5" and node.get("tls"):
+            return "socks5-tls"
+    return kind
+
+
+def reconcile(target, content, nodes):
+    """Recover safely representable nodes, skip individual conversion failures.
+
+    No client reachability is inferred from syntax. All original, verified
+    nodes remain in the shared node pool even when a target skips them.
+    Malformed whole-format artifacts raise CoverageError so the caller can
+    preserve that format's last published Gist file.
     """
     if target not in ("clash", "surge", "singbox"):
-        return content, {"restored": 0, "unsupported": {}, "expected": 0, "found": 0}
-    original = {_name(n).casefold(): n for n in nodes if isinstance(n, dict) and _name(n)}
-    if len(original) != len([n for n in nodes if isinstance(n, dict) and _name(n)]):
-        raise CoverageError("current verified nodes have duplicate names")
+        return content, {"restored": 0, "unsupported": {}, "failed": {},
+                         "expected": 0, "found": 0, "skipped": 0, "by_protocol": {}}
+    originals = [n for n in nodes if isinstance(n, dict) and _name(n)]
+    original = {_name(n).casefold(): n for n in originals}
+    if len(original) != len(originals):
+        raise CoverageError("verified source contains duplicate node names")
     if not original:
         raise CoverageError("no verified nodes to audit")
     try:
         if target == "clash":
             data = yaml.safe_load(content)
+            if not isinstance(data, dict) or not isinstance(data.get("proxies"), list):
+                raise ValueError("invalid Clash proxies list")
             existing_types = {_name(n).casefold(): str(n.get("type", "")).lower()
-                              for n in data["proxies"] if isinstance(n, dict)}
+                              for n in data["proxies"] if isinstance(n, dict) and _name(n)}
         elif target == "singbox":
             data = json.loads(content)
+            if not isinstance(data, dict) or not isinstance(data.get("outbounds"), list):
+                raise ValueError("invalid sing-box outbound list")
             existing_types = {str(n.get("tag", "")).strip().casefold(): str(n.get("type", "")).lower()
-                              for n in data["outbounds"] if isinstance(n, dict)}
+                              for n in data["outbounds"] if isinstance(n, dict) and n.get("tag")}
         else:
-            data = None
+            if not isinstance(content, str) or not content.strip():
+                raise ValueError("empty Surge artifact")
+            data = content
             existing_types = _surge_types(content)
-        existing = set(existing_types)
-    except (ValueError, TypeError, KeyError, AttributeError) as exc:
+    except (ValueError, TypeError, KeyError, AttributeError, yaml.YAMLError):
         raise CoverageError("cannot parse converted " + target + " artifact") from None
-    recovered, recovered_names, unsupported, failures = [], [], Counter(), Counter()
+
+    recovered, names, unsupported, failures, mismatched = [], [], Counter(), Counter(), set()
     supported_types = SURGE_TYPES if target == "surge" else SINGBOX_TYPES
     for name, node in original.items():
-        t = str(node.get("type", "")).lower()
-        if name in existing:
-            allowed_type = t
-            if target == "singbox":
-                allowed_type = {"ss": "shadowsocks", "socks5": "socks"}.get(t, t)
-            elif target == "surge" and t == "tuic":
-                allowed_type = "tuic" if node.get("token") else "tuic-v5"
-            elif target == "surge" and t == "http" and node.get("tls"):
-                allowed_type = "https"
-            elif target == "surge" and t == "socks5" and node.get("tls"):
-                allowed_type = "socks5-tls"
-            if existing_types[name] != allowed_type:
-                raise CoverageError(f"{target} converted node protocol mismatch ({t}); keeping previous Gist")
+        kind = str(node.get("type", "")).lower()
+        actual = existing_types.get(name)
+        if actual == _expected_type(target, node):
             continue
-        if target != "clash" and t not in supported_types:
-            unsupported[t] += 1
+        if actual is not None:
+            mismatched.add(name)
+        # Retain a converter's valid existing output even for a protocol not
+        # handled by our fallback. Never invent unsupported target syntax.
+        if target != "clash" and kind not in supported_types:
+            unsupported[kind] += 1
             continue
         try:
             if target == "clash":
-                recovered.append({k: copy.deepcopy(v) for k, v in node.items()
-                                  if k not in PRIVATE_META and not k.startswith("_")})
+                new_item = {k: copy.deepcopy(v) for k, v in node.items()
+                            if k not in PRIVATE_META and not k.startswith("_")}
             elif target == "surge":
-                recovered.append(_surge_line(node))
+                new_item = _surge_line(node)
             else:
-                recovered.append(_singbox_outbound(node))
-            recovered_names.append(_name(node))
-        except (ValueError, TypeError, KeyError, AttributeError):
-            failures[t] += 1
-    if failures:
-        summary = ", ".join(f"{k}:{v}" for k, v in sorted(failures.items()))
-        raise CoverageError(f"{target} has supported protocols without safe conversion ({summary}); keeping previous Gist")
+                new_item = _singbox_outbound(node)
+            recovered.append(new_item)
+            names.append(_name(node))
+        except (ValueError, TypeError, KeyError, AttributeError, OverflowError):
+            failures[kind] += 1
+
+    if mismatched:
+        data = _remove_bad_entries(target, data, mismatched)
     if recovered:
         if target == "clash":
             data["proxies"].extend(recovered)
-            _update_groups(data.get("proxy-groups", []), recovered_names, clash=True)
+            _update_groups(data.get("proxy-groups", []), names, clash=True)
             content = yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
         elif target == "singbox":
             data["outbounds"].extend(recovered)
-            _update_groups(data["outbounds"], recovered_names)
+            _update_groups(data["outbounds"], names)
             content = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
         else:
-            content = _insert_surge(content, recovered, recovered_names)
-    if target == "clash":
-        found = {_name(n).casefold() for n in yaml.safe_load(content)["proxies"]}
-    elif target == "singbox":
-        found = {str(n.get("tag", "")).casefold() for n in json.loads(content)["outbounds"]}
-    else:
-        found = _surge_names(content)
-    target_supported = sum(target == "clash" or str(n.get("type", "")).lower() in supported_types
-                           for n in original.values())
-    expected_names = {name for name, n in original.items()
-                      if target == "clash" or str(n.get("type", "")).lower() in supported_types}
-    if not expected_names.issubset(found):
-        raise CoverageError("converted " + target + " still missing compatible nodes")
+            content = _insert_surge(data, recovered, names)
+    elif mismatched:
+        if target == "clash":
+            content = yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
+        elif target == "singbox":
+            content = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+        else:
+            content = data
+    found_names = _output_names(target, content)
     by_protocol = {}
-    for source in original.values():
-        typ = str(source.get("type", "")).lower()
-        if target != "clash" and typ not in supported_types:
-            continue
-        item = by_protocol.setdefault(typ, {"expected": 0, "found": 0})
-        item["expected"] += 1
-        if _name(source).casefold() in found:
-            item["found"] += 1
+    for name, node in original.items():
+        kind = str(node.get("type", "")).lower()
+        row = by_protocol.setdefault(kind, {"expected": 0, "found": 0, "skipped": 0})
+        row["expected"] += 1
+        if name in found_names:
+            row["found"] += 1
+        else:
+            row["skipped"] += 1
+    found = sum(name in found_names for name in original)
     return content, {"restored": len(recovered), "unsupported": dict(unsupported),
-                     "expected": target_supported, "found": len(found & expected_names),
-                     "by_protocol": by_protocol}
+                     "failed": dict(failures), "expected": len(original), "found": found,
+                     "skipped": len(original) - found, "by_protocol": by_protocol}
