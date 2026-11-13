@@ -351,6 +351,16 @@ def aggregate(args: argparse.Namespace) -> None:
             filepath = os.path.join(DATA_BASE, t[1])
             shutil.move(os.path.join(PATH, "subconverter", t[1]), filepath)
 
+            # Fix only the managed URL after upstream's normal Surge conversion.
+            # Do not alter Surge's update interval, DNS, rules, nodes or formats.
+            if t[2] == "surge" and username and gist_id:
+                from surge_provider import fix_managed_gist_url
+                with open(filepath, encoding="utf-8") as source_file:
+                    profile = source_file.read()
+                profile = fix_managed_gist_url(profile, username, gist_id)
+                with open(filepath, "w", encoding="utf-8") as output_file:
+                    output_file.write(profile)
+
             records[t[1]] = filepath
 
     # Minimal output extension: preserve a pure proxy policy-path alongside

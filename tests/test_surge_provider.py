@@ -52,5 +52,48 @@ class SurgePolicyPathTests(unittest.TestCase):
         self.assertNotIn('from protocol_coverage import', source)
 
 
+class SurgeManagedGistTests(unittest.TestCase):
+    def test_wrong_localhost_url_is_replaced_but_interval_kept(self):
+        from surge_provider import fix_managed_gist_url
+        source = ("#!MANAGED-CONFIG http://127.0.0.1:25500/sub?target=surge "
+                  "interval=86400 strict=false\n"
+                  "[General]\ndns-server = 223.5.5.5\n"
+                  "[Proxy]\n🇭🇰 香港 001 = trojan, h.example, 443, password=secret\n")
+        result = fix_managed_gist_url(source, "PrematchValue", "0123456789abcdef0123456789abcdef")
+        self.assertTrue(result.startswith(
+            "#!MANAGED-CONFIG https://gist.githubusercontent.com/PrematchValue/"
+            "0123456789abcdef0123456789abcdef/raw/surge.conf interval=86400 strict=false\n"))
+        self.assertNotIn("127.0.0.1", result)
+        self.assertNotIn("interval=14400", result)
+        self.assertIn("dns-server = 223.5.5.5", result)
+        self.assertEqual(fix_managed_gist_url(result, "PrematchValue",
+                         "0123456789abcdef0123456789abcdef"), result)
+
+    def test_missing_header_defaults_to_surge_native_interval(self):
+        from surge_provider import fix_managed_gist_url
+        result = fix_managed_gist_url("[General]\nloglevel = notify\n",
+                                      "PrematchValue", "0123456789abcdef")
+        self.assertTrue(result.startswith(
+            "#!MANAGED-CONFIG https://gist.githubusercontent.com/PrematchValue/"
+            "0123456789abcdef/raw/surge.conf\n"))
+        self.assertNotIn("interval=", result)
+        self.assertIn("[General]\nloglevel = notify", result)
+
+    def test_multiple_headers_fail_closed(self):
+        from surge_provider import fix_managed_gist_url
+        with self.assertRaises(ValueError):
+            fix_managed_gist_url(
+                "#!MANAGED-CONFIG http://127.0.0.1:25500/a\n"
+                "#!MANAGED-CONFIG http://127.0.0.1:25500/b\n[General]\n",
+                "PrematchValue", "0123456789abcdef")
+
+    def test_collect_repairs_managed_url_without_changing_pref(self):
+        code = (ROOT / "subscribe/collect.py").read_text(encoding="utf-8")
+        self.assertIn('from surge_provider import fix_managed_gist_url', code)
+        self.assertIn('profile = fix_managed_gist_url(profile, username, gist_id)', code)
+        settings = (ROOT / "subconverter/pref.toml").read_text(encoding="utf-8")
+        self.assertIn('config_update_interval = 86400', settings)
+
+
 if __name__ == '__main__':
     unittest.main()

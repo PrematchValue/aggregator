@@ -60,3 +60,35 @@ def proxy_lines_only(profile: str) -> str:
     if not policies:
         raise ValueError("Surge conversion contains no supported proxy nodes")
     return "\n".join(policies) + "\n"
+
+
+def fix_managed_gist_url(profile: str, username: str, gist_id: str) -> str:
+    """Point Surge managed updates at the live Gist without changing interval.
+
+    SubConverter sometimes emits a localhost /sub URL. Surge iOS cannot
+    reach that address. Keep existing interval/strict parameters verbatim.
+    """
+    if not isinstance(profile, str) or not profile.strip():
+        raise ValueError("empty Surge profile")
+    if not re.fullmatch(r"[A-Za-z0-9-]{1,39}", username or ""):
+        raise ValueError("invalid Gist username")
+    if not re.fullmatch(r"[0-9a-fA-F]{8,64}", gist_id or ""):
+        raise ValueError("invalid Gist ID")
+    url = f"https://gist.githubusercontent.com/{username}/{gist_id}/raw/surge.conf"
+    lines = profile.splitlines(keepends=True)
+    # Preserve whatever update interval/strict settings SubConverter produced.
+    found = []
+    for index, line in enumerate(lines):
+        if "#!MANAGED-CONFIG" in line:
+            match = re.fullmatch(r"[ \t]*#!MANAGED-CONFIG[ \t]+\S+([^\r\n]*)\r?\n?", line)
+            if not match:
+                raise ValueError("invalid Surge managed header")
+            found.append((index, match.group(1)))
+    if len(found) > 1:
+        raise ValueError("duplicate Surge managed headers")
+    suffix = found[0][1] if found else ""
+    if found:
+        del lines[found[0][0]]
+    # Surge's default for a missing interval is 86400s; never substitute 4h.
+    header = f"#!MANAGED-CONFIG {url}{suffix}\n"
+    return header + "".join(lines)
