@@ -50,7 +50,9 @@ class WorkflowTests(unittest.TestCase):
     def test_full_refresh_reuses_upstream_collector(self):
         content = (Path(__file__).resolve().parents[1] / ".github/workflows/refresh.yaml").read_text()
         self.assertIn('17 */4 * * *', content)
-        self.assertIn('47 */4 * * *', content)
+        self.assertNotIn('47 */4 * * *', content)
+        standby = (Path(__file__).resolve().parents[1] / ".github/workflows/refresh-backup.yaml").read_text()
+        self.assertIn('47 1-23/4 * * *', standby)
         self.assertIn(' --geo-rename ', content)
         self.assertNotIn('--stage-output', content)
         self.assertNotIn('--publish-stage', content)

@@ -20,13 +20,13 @@ def run(run_id, mins, status="completed", conclusion="success", updated_min=None
 
 
 class RefreshDueTests(unittest.TestCase):
-    def test_backup_skips_recent_success(self):
+    def test_primary_skips_recent_success(self):
         self.assertFalse(should_start("schedule", [run(1, 30)], 2, NOW)[0])
 
-    def test_next_two_hour_slot_allowed(self):
+    def test_old_success_does_not_block_primary(self):
         self.assertTrue(should_start("schedule", [run(1, 121)], 2, NOW)[0])
 
-    def test_failure_retries_in_backup_slot(self):
+    def test_primary_not_blocked_by_earlier_failure(self):
         self.assertTrue(should_start("schedule", [run(1, 30, conclusion="failure")], 2, NOW)[0])
 
     def test_recent_active_skipped(self):
@@ -35,7 +35,7 @@ class RefreshDueTests(unittest.TestCase):
     def test_manual_never_suppressed(self):
         self.assertTrue(should_start("workflow_dispatch", [run(1, 2)], 2, NOW)[0])
 
-    def test_long_ended_run_skips_immediate_backup(self):
+    def test_just_completed_run_blocks_primary(self):
         self.assertFalse(should_start("schedule", [run(1, 130, updated_min=2)], 2, NOW)[0])
 
     def test_old_or_foreign_runs_not_suppressing(self):

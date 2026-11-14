@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Idempotency gate for redundant GitHub schedule events.
+"""Idempotency gate for primary Refresh and conditional standby retries.
 
-The redundant cron does not guarantee delivery; this gate skips expensive
-collection when another recent Refresh has already succeeded or is running.
-Failures are eligible for immediate retry and GitHub API errors fail open.
+A user-initiated Refresh always runs. Scheduled Refresh skips overlapping
+work. Internally dispatched standby jobs recheck the primary slot before
+starting collection; a status lookup failure suppresses standby only.
 """
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 import json
 import os
 import urllib.request
+
+from refresh_backup import parse_utc, should_dispatch_backup
 
 RECENT_START_SECONDS = 115 * 60
 RECENT_FINISH_SECONDS = 20 * 60
@@ -52,8 +54,9 @@ def should_start(event: str, runs: list[dict], current_id: int, now=None) -> tup
 
 def main():
     event = os.environ.get("GITHUB_EVENT_NAME", "")
+    backup_slot = os.environ.get("BACKUP_SLOT", "").strip() if event == "workflow_dispatch" else ""
     due, why = True, "manual trigger"
-    if event == "schedule":
+    if event == "schedule" or backup_slot:
         try:
             repo = os.environ["GITHUB_REPOSITORY"]
             token = os.environ["GH_TOKEN"]
@@ -69,10 +72,21 @@ def main():
                 runs = json.load(resp).get("workflow_runs", [])
             if not isinstance(runs, list):
                 raise ValueError("invalid GitHub runs response")
-            due, why = should_start(event, runs, run_id)
+            if backup_slot:
+                # The standby was dispatched, but a delayed primary may have
+                # appeared meanwhile. Check again under Refresh concurrency.
+                due, why = should_dispatch_backup(
+                    runs, parse_utc(backup_slot), datetime.now(timezone.utc), run_id
+                )
+            else:
+                due, why = should_start(event, runs, run_id)
         except (OSError, KeyError, ValueError, TypeError) as exc:
-            # Prioritize uptime: a failed status query must not suppress collection.
-            due, why = True, f"GitHub status unavailable ({type(exc).__name__}); fail open"
+            # Ordinary scheduled Refresh stays available during API errors,
+            # but a standby must never guess that the primary is absent.
+            due = not bool(backup_slot)
+            why = f"GitHub status unavailable ({type(exc).__name__}); " + (
+                "standby fails closed" if backup_slot else "scheduled Refresh fails open"
+            )
     value = "true" if due else "false"
     print(f"Refresh trigger: {'RUN' if due else 'SKIP'}; {why}")
     output = os.environ.get("GITHUB_OUTPUT")

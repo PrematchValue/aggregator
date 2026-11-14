@@ -2,8 +2,13 @@ name: Refresh
 on:
   schedule:
     - cron: "17 */4 * * *"
-    - cron: "47 */4 * * *"
   workflow_dispatch:
+    inputs:
+      backup_slot:
+        description: "Automatic backup slot (UTC); leave empty for manual runs"
+        required: false
+        type: string
+        default: ""
 
 concurrency:
   group: refresh-${{ github.repository }}
@@ -34,6 +39,7 @@ jobs:
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
+          BACKUP_SLOT: ${{ github.event.inputs.backup_slot }}
         run: python -u subscribe/refresh_due.py
 
   process:

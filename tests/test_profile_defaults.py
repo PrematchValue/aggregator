@@ -48,7 +48,11 @@ class ProfileAndScheduleTests(unittest.TestCase):
     def test_refresh_four_hour_full_scan(self):
         yml = (ROOT/'.github/workflows/refresh.yaml').read_text(encoding='utf-8')
         self.assertIn('cron: "17 */4 * * *"', yml)
-        self.assertIn('cron: "47 */4 * * *"', yml)
+        self.assertNotIn('cron: "47 */4 * * *"', yml)
+        self.assertIn('backup_slot:', yml)
+        standby = (ROOT / ".github/workflows/refresh-backup.yaml").read_text(encoding="utf-8")
+        self.assertIn('cron: "47 1-23/4 * * *"', standby)
+        self.assertIn("actions: write", standby)
         self.assertIn(' --geo-rename ', yml)
         self.assertNotIn('--max-candidates', yml)
         self.assertNotIn('--stage-output', yml)
