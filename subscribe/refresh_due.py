@@ -12,7 +12,7 @@ import json
 import os
 import urllib.request
 
-from refresh_backup import parse_utc, should_dispatch_backup
+from refresh_backup import process_conclusion, should_dispatch_backup
 
 RECENT_START_SECONDS = 115 * 60
 RECENT_FINISH_SECONDS = 20 * 60
@@ -76,7 +76,8 @@ def main():
                 # The standby was dispatched, but a delayed primary may have
                 # appeared meanwhile. Check again under Refresh concurrency.
                 due, why = should_dispatch_backup(
-                    runs, parse_utc(backup_slot), datetime.now(timezone.utc), run_id
+                    runs, datetime.now(timezone.utc),
+                    lambda rid: process_conclusion(repo, token, rid), run_id
                 )
             else:
                 due, why = should_start(event, runs, run_id)

@@ -13,6 +13,8 @@ import subprocess
 import sys
 import time
 
+from verified_nodes import load_verified_nodes, merge_candidates, snapshot_content
+
 import executable
 import pipeline
 import push
@@ -227,8 +229,7 @@ def aggregate(args: argparse.Namespace) -> None:
     )
 
     if not tasks:
-        logger.error("cannot found any valid config, exit")
-        sys.exit(0)
+        logger.warning("本轮没有新的机场或有效订阅，将尝试复检历史有效节点")
 
     # 已有订阅已经做过过期检查，无需再测
     old_subscriptions = set()
@@ -240,12 +241,21 @@ def aggregate(args: argparse.Namespace) -> None:
     if os.path.exists(generate_conf) and os.path.isfile(generate_conf):
         os.remove(generate_conf)
 
-    results = pipeline.execute_tasks(tasks)
+    results = pipeline.execute_tasks(tasks) if tasks else []
     proxies = list(itertools.chain.from_iterable([x[1] for x in results if x]))
+    fresh_count = len(proxies)
+    if getattr(args, "geo_rename", False):
+        try:
+            previous = load_verified_nodes(gist_id, access_token)
+        except Exception as exc:
+            logger.error("读取历史节点快照失败，为避免覆盖上一轮有效节点，本轮停止发布：" + type(exc).__name__)
+            sys.exit(1)
+        proxies, recovered = merge_candidates(proxies, previous)
+        logger.info(f"节点复检：新获取={fresh_count}，历史候选={len(previous)}，额外找回={recovered}，合计={len(proxies)}")
 
     if len(proxies) == 0:
-        logger.error("exit because cannot fetch any proxy node")
-        sys.exit(0)
+        logger.error("新旧候选均无可检测节点，本轮不更新旧订阅")
+        sys.exit(1)
 
     nodes, workspace = [], os.path.join(PATH, "clash")
 
@@ -291,8 +301,8 @@ def aggregate(args: argparse.Namespace) -> None:
 
         nodes = [proxies[i] for i in range(len(proxies)) if masks[i]]
         if len(nodes) <= 0:
-            logger.error(f"cannot fetch any proxy")
-            sys.exit(0)
+            logger.error("所有新旧节点均未通过连通检测，保留 Gist 上一轮结果")
+            sys.exit(1)
 
     # Presentation extension only: reuse upstream's Mihomo location engine.
     # All discovery, liveness, parsing and conversion are upstream code.
@@ -305,6 +315,8 @@ def aggregate(args: argparse.Namespace) -> None:
             logger.error("没有确认出口地区的节点；不更新订阅")
             sys.exit(1)
 
+    # Only an exit-verified snapshot is retained; no stale-node archive.
+    history_content = snapshot_content(nodes) if getattr(args, "geo_rename", False) else ""
     subscriptions = set()
     for p in proxies:
         # 移除无用的标记
@@ -433,6 +445,8 @@ def aggregate(args: argparse.Namespace) -> None:
             files[subscribes_file] = {"content": "\n".join(urls), "filename": subscribes_file}
 
         if files:
+            if history_content:
+                files["verified-nodes.json"] = {"content": history_content, "filename": "verified-nodes.json"}
             push_client = push.PushToGist(token=access_token)
 
             # 上传
@@ -440,7 +454,8 @@ def aggregate(args: argparse.Namespace) -> None:
             if success:
                 logger.info(f"upload proxies and subscriptions to gist successed")
             else:
-                logger.error(f"upload proxies and subscriptions to gist failed")
+                logger.error("Gist 发布失败，旧节点快照保持不变")
+                sys.exit(1)
 
     # 清理工作空间
     workflow.cleanup(workspace, [])
