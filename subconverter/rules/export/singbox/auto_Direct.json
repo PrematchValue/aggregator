@@ -1,0 +1,41 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain_suffix": [
+        "flyert.com",
+        "gandi.net",
+        "snapdrop.net",
+        "dl.delivery.mp.microsoft.com",
+        "update.microsoft.com",
+        "windowsupdate.com",
+        "windowsupdate.microsoft.com",
+        "paypal.com",
+        "paypal.me",
+        "paypal-mktg.com",
+        "paypalobjects.com",
+        "cm.steampowered.com",
+        "steamserver.net"
+      ]
+    },
+    {
+      "domain": [
+        "download.jetbrains.com",
+        "origin-a.akamaihd.net",
+        "outlook.office365.com",
+        "smtp-mail.outlook.com",
+        "smtp.office365.com",
+        "download.microsoft.com",
+        "wustat.windows.com",
+        "ntservicepack.microsoft.com"
+      ]
+    },
+    {
+      "ip_cidr": [
+        "182.254.116.0/24",
+        "203.205.238.0/23",
+        "203.205.254.0/23"
+      ]
+    }
+  ]
+}

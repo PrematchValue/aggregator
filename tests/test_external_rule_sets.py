@@ -39,20 +39,18 @@ class ExternalRulesTests(unittest.TestCase):
         self.assertIn('DOMAIN-SUFFIX,facebook.com', read_rules('rules/custom/GlobalProxy.list'))
         self.assertTrue(read_rules('rules/auto/GlobalProxy.list'))
 
-    def test_clash_mi_uses_stable_inline_subconverter_rules(self):
-        # Clash now keeps SubConverter's original inline rules. No remote
-        # rule providers can fail during first boot. Other formats remain external.
+    def test_clash_mi_uses_inline_subconverter_rules(self):
         collect = (ROOT / 'subscribe/collect.py').read_text('utf-8')
         self.assertNotIn('externalize_clash(updated)', collect)
         self.assertIn("target_name == 'surge'", collect)
         self.assertIn('externalize_surge(updated)', collect)
-        names = [r['ruleset'] for r in registry()]
-        self.assertLess(names.index('rules/custom/BilibiliRegion.list'),
+        names = [e['ruleset'] for e in registry()]
+        self.assertLess(names.index('rules/auto/StreamingCN.list'),
                         names.index('rules/custom/ChinaDirect.list'))
-        bilibili = read_rules('rules/custom/BilibiliRegion.list')
-        self.assertIn('DOMAIN,www.bilibili.com', bilibili)
-        self.assertIn('DOMAIN,m.bilibili.com', bilibili)
-        self.assertIn('DOMAIN-KEYWORD,cn-hk-eq-bcache-', bilibili)
+        self.assertLess(names.index('rules/auto/GitHubService.list'),
+                        names.index('rules/auto/GlobalProxy.list'))
+        self.assertIn('DOMAIN,www.bilibili.com', read_rules('rules/auto/StreamingCN.list'))
+        self.assertIn('DOMAIN-KEYWORD,cn-hk-eq-bcache-', read_rules('rules/auto/StreamingCN.list'))
 
     def test_surge_remote_sets_and_pure_proxy_section(self):
         source = '[General]\ndns-server = 223.5.5.5\n[Proxy]\n🇯🇵 日本 001 = ss, x, 443, encrypt-method=aes-128-gcm, password=secret\n[Proxy Group]\n全球加速 = select, 🇯🇵 日本 001\n[Rule]\nDOMAIN-SUFFIX,example.com,DIRECT\nFINAL,漏网之鱼\n[Host]\nwww.example.com = 1.1.1.1\n'

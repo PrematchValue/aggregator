@@ -34,6 +34,8 @@ class PolicyLayoutTests(unittest.TestCase):
             "AI服务": ["日本节点", *[x for x in normal if x != "日本节点"]],
             "TikTok": ["日本节点", *[x for x in normal if x != "日本节点"]],
             "漏网之鱼": ["全球加速", "国内直连"],
+            "微软服务": ["美国节点", *[x for x in normal if x != "美国节点"]],
+            "Google语音": ["美国节点", *[x for x in normal if x != "美国节点"]],
         }
         for name in SERVICES:
             self.assertEqual(groups[name]["proxies"], expected.get(name, normal))

@@ -254,6 +254,11 @@ if __name__ == "__main__":
     if args.update:
         for name, status in update().items():
             print(f"{name}: {status}")
+        from verified_public_rules import update as update_public
+        for name, status in update_public().items():
+            print(f"{name}: {status}")
     else:
         check()
+        from verified_public_rules import check as check_public
+        check_public()
         print("自动规则快照检查通过")

@@ -16,6 +16,9 @@ ICONS = {
     "苹果服务": "Apple.png",
     "苹果推送": "iCloud.png",
     "Google服务": "Google_Search.png",
+    "Google语音": "Google_Search.png",
+    "GitHub服务": "GitHub.png",
+    "微软服务": "Windows.png",
     "国际媒体": "Streaming.png",
     "港台番剧": "bilibili_3.png",
     "AI服务": "AI.png",
@@ -32,7 +35,8 @@ ICONS = {
     "特殊节点": "Available.png",
 }
 SERVICES = (
-    "苹果服务", "苹果推送", "Google服务", "国际媒体", "港台番剧",
+    "苹果服务", "苹果推送", "Google服务", "Google语音",
+    "GitHub服务", "微软服务", "国际媒体", "港台番剧",
     "AI服务", "TikTok", "Telegram", "数字资产", "冷钱包", "漏网之鱼",
 )
 REGIONS = (
@@ -75,7 +79,9 @@ def service_choices(name: str, enabled: list[str], direct: str) -> list[str]:
         return ["全球加速", direct]
     choices = [*enabled, direct]
     first = {"苹果服务": direct, "港台番剧": direct,
-             "AI服务": "日本节点", "TikTok": "日本节点"}.get(name)
+             "AI服务": "日本节点", "TikTok": "日本节点",
+             "GitHub服务": "香港节点", "微软服务": "美国节点",
+             "Google语音": "美国节点"}.get(name)
     if first in choices:
         choices.remove(first)
         choices.insert(0, first)

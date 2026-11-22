@@ -1,26 +1,5 @@
-# Regional streaming: matched RuleGo Streaming/CN categories; also keep Bilibili Intl.
-# Source: https://raw.githubusercontent.com/ConnersHua/RuleGo/master/Surge/Ruleset/Extra/Streaming/CN.list
-# Keep common bilivideo.com / hdslb.com CDN on mainland DIRECT; don't proxy entire Bilibili tree.
-# The regional selector can be switched to HK/TW; it defaults to DIRECT.
-# Bilibili (RuleGo CN streaming)
-DOMAIN,api.biliapi.com
-DOMAIN,api.biliapi.net
-DOMAIN,api.bilibili.com
-DOMAIN,app.biliapi.com
-DOMAIN,app.biliapi.net
-DOMAIN,app.bilibili.com
-DOMAIN,grpc.biliapi.net
-DOMAIN,m.bilibili.com
-DOMAIN,upos-hz-mirrorakam.akamaized.net
-DOMAIN,www.bilibili.com
-DOMAIN-KEYWORD,cn-hk-eq-bcache-
-# Taiwan iQIYI / international MangoTV (RuleGo CN streaming)
-DOMAIN,cache.video.iqiyi.com
-IP-CIDR,116.211.202.206/32,no-resolve
-IP-CIDR,116.211.202.216/32,no-resolve
-DOMAIN-SUFFIX,api.mgtv.com
-DOMAIN,mobileso.bz.mgtv.com
-# Existing separate Bilibili international and specific CDN matches.
+# Bilibili international-only, supplemental to RuleGo Streaming/CN.
+# Mainland shared video CDNs (bilivideo.com / hdslb.com) remain DIRECT.
 DOMAIN-SUFFIX,bilibili.tv
 DOMAIN-SUFFIX,bstarstatic.com
 DOMAIN,upos-sz-mirrorakam.akamaized.net

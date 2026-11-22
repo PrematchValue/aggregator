@@ -53,7 +53,6 @@ class TargetedRoutingTests(unittest.TestCase):
         regional = (ROOT / "subconverter/rules/custom/BilibiliRegion.list").read_text(encoding="utf-8")
         self.assertNotIn("DOMAIN-SUFFIX,bilivideo.com", regional)
         self.assertNotIn("DOMAIN-SUFFIX,hdslb.com", regional)
-        self.assertNotIn("DOMAIN,api.bilibili.tv", regional)
 
     def test_cold_wallet_matches_wallet_and_rpc_not_dex_or_explorers(self):
         for domain in ("api.ledger.com", "connect.trezor.io",

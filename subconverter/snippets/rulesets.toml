@@ -1,10 +1,25 @@
-# Local, ordered rule registry for both Surge and Clash outputs.
-# Specific services before broad Google/Apple and China rules.
-# All group names are ASCII/Chinese without decorative emoji.
+# Verified rules: ad-block -> direct exceptions -> personal services ->
+# domestic -> overseas -> GeoIP CN -> final. Source order is policy order.
 
 [[rulesets]]
 group = "DIRECT"
 ruleset = "rules/LocalAreaNetwork.list"
+
+[[rulesets]]
+group = "REJECT"
+ruleset = "rules/custom/BlockAds.list"
+
+[[rulesets]]
+group = "REJECT"
+ruleset = "rules/auto/Advertising.list"
+
+[[rulesets]]
+group = "REJECT"
+ruleset = "rules/auto/Tracking.list"
+
+[[rulesets]]
+group = "DIRECT"
+ruleset = "rules/auto/DirectPlus.list"
 
 [[rulesets]]
 group = "苹果推送"
@@ -39,6 +54,10 @@ group = "港台番剧"
 ruleset = "rules/custom/BilibiliRegion.list"
 
 [[rulesets]]
+group = "港台番剧"
+ruleset = "rules/auto/StreamingCN.list"
+
+[[rulesets]]
 group = "国际媒体"
 ruleset = "rules/custom/InternationalMedia.list"
 
@@ -47,12 +66,28 @@ group = "国际媒体"
 ruleset = "rules/auto/InternationalMedia.list"
 
 [[rulesets]]
+group = "国际媒体"
+ruleset = "rules/auto/InternationalMediaFull.list"
+
+[[rulesets]]
 group = "Telegram"
 ruleset = "rules/custom/Telegram.list"
 
 [[rulesets]]
 group = "Telegram"
 ruleset = "rules/auto/TelegramDomain.list"
+
+[[rulesets]]
+group = "Google语音"
+ruleset = "rules/custom/GoogleVoice.list"
+
+[[rulesets]]
+group = "GitHub服务"
+ruleset = "rules/auto/GitHubService.list"
+
+[[rulesets]]
+group = "微软服务"
+ruleset = "rules/auto/MicrosoftService.list"
 
 [[rulesets]]
 group = "Google服务"
@@ -67,12 +102,16 @@ group = "苹果服务"
 ruleset = "rules/auto/AppleService.list"
 
 [[rulesets]]
-group = "REJECT"
-ruleset = "rules/custom/BlockAds.list"
+group = "DIRECT"
+ruleset = "rules/custom/ChinaDirect.list"
 
 [[rulesets]]
 group = "DIRECT"
-ruleset = "rules/custom/ChinaDirect.list"
+ruleset = "rules/auto/Direct.list"
+
+[[rulesets]]
+group = "DIRECT"
+ruleset = "rules/auto/WeChat.list"
 
 [[rulesets]]
 group = "Telegram"

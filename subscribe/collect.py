@@ -375,6 +375,13 @@ def aggregate(args: argparse.Namespace) -> None:
                 with open(filepath, encoding="utf-8") as rendered:
                     profile = rendered.read()
                 updated = apply_profile_layout(profile, target_name)
+                if target_name == 'clash':
+                    import yaml
+                    document = yaml.safe_load(updated)
+                    if not document.get('rules') and not document.get('Rule'):
+                        raise ValueError('Clash rule list missing')
+                    if document.get('rule-providers'):
+                        raise ValueError('Clash Mi fallback must not use external providers')
                 # Clash Mi: keep the former SubConverter inline routing output.
                 # This avoids 20+ remote rule providers on the first client start.
                 if target_name == 'surge':
