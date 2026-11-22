@@ -1,8 +1,10 @@
-# HK/TW Bilibili traffic. The app shares domains across mainland and HK/TW
-# video; HTTPS domain routing cannot distinguish individual episode paths.
+# HK/TW content: route identity/playback APIs and overseas-only video CDN.
+# Domain-level rules cannot distinguish HK/TW episodes from mainland episodes
+# sharing api.bilibili.com / app.bilibili.com. That trade-off is intentional.
+# Generic bilivideo.com and hdslb.com CDN must NOT be proxied wholesale.
 DOMAIN-SUFFIX,bilibili.tv
 DOMAIN-SUFFIX,bstarstatic.com
 DOMAIN,api.bilibili.com
-DOMAIN,api.bilibili.tv
-DOMAIN-SUFFIX,bilivideo.com
-DOMAIN-SUFFIX,hdslb.com
+DOMAIN,app.bilibili.com
+DOMAIN,upos-hz-mirrorakam.akamaized.net
+DOMAIN,upos-sz-mirrorakam.akamaized.net

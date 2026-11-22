@@ -377,6 +377,20 @@ def aggregate(args: argparse.Namespace) -> None:
                     logger.error("策略组生成失败，停止发布以保留旧订阅：" + str(exc))
                     sys.exit(1)
 
+            # Resolve Sing-box proxy DNS and local service/region policy tags.
+            # Keep source proxy protocols and the upstream converted rules intact.
+            if t[2] == "singbox":
+                from singbox_layout import apply_singbox_layout
+                try:
+                    with open(filepath, encoding="utf-8") as source_file:
+                        profile = source_file.read()
+                    updated = apply_singbox_layout(profile)
+                    with open(filepath, "w", encoding="utf-8") as output_file:
+                        output_file.write(updated)
+                except (OSError, ValueError) as exc:
+                    logger.error("Sing-box 出站或 DNS 分流校验失败，停止发布：" + str(exc))
+                    sys.exit(1)
+
             # Fix only the managed URL after upstream's normal Surge conversion.
             # Do not alter Surge's update interval, DNS, rules, nodes or formats.
             if t[2] == "surge" and username and gist_id:

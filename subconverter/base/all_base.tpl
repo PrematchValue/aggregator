@@ -311,7 +311,7 @@ enhanced-mode-by-rule = true
     "servers": [
       {"type": "udp", "tag": "dns_resolver", "server": "223.5.5.5"},
       {"type": "https", "tag": "dns_direct", "server": "dns.alidns.com", "path": "/dns-query", "domain_resolver": "dns_resolver"},
-      {"type": "https", "tag": "dns_proxy", "server": "1.1.1.1", "path": "/dns-query", "detour": "🔰 节点选择"},
+      {"type": "https", "tag": "dns_proxy", "server": "1.1.1.1", "path": "/dns-query", "detour": "全球加速"},
       {"type": "fakeip", "tag": "dns_fakeip", "inet4_range": "198.18.0.0/15"}
     ],
     "rules": [

@@ -1,26 +1,37 @@
-# Wallet vendors and major blockchain RPC/indexer services.
-# Do not inspect signatures, inject MITM, or assume every wallet RPC is covered.
+# Wallet software and shared wallet RPC infrastructure.
+# No DEX platforms, general-purpose chain websites or block explorers.
+# This is a domain list, NOT a guarantee that all wallet RPCs are covered.
+# Never use HTTPS interception for wallet traffic.
 DOMAIN-SUFFIX,ledger.com
 DOMAIN-SUFFIX,ledgerwallet.com
 DOMAIN-SUFFIX,ledgerlive.com
 DOMAIN-SUFFIX,trezor.io
 DOMAIN-SUFFIX,safepal.com
 DOMAIN-SUFFIX,safepal.io
+DOMAIN-SUFFIX,onekey.so
+DOMAIN-SUFFIX,keyst.one
+DOMAIN-SUFFIX,keystonewallet.io
+DOMAIN-SUFFIX,ellipal.com
+DOMAIN-SUFFIX,coolwallet.io
 DOMAIN-SUFFIX,metamask.io
+DOMAIN-SUFFIX,rabby.io
+DOMAIN-SUFFIX,trustwallet.com
+DOMAIN-SUFFIX,phantom.app
+DOMAIN-SUFFIX,solflare.com
+DOMAIN-SUFFIX,imtoken.com
+DOMAIN-SUFFIX,tokenpocket.pro
+DOMAIN-SUFFIX,walletconnect.com
+DOMAIN-SUFFIX,walletconnect.org
+DOMAIN-SUFFIX,reown.com
 DOMAIN-SUFFIX,infura.io
 DOMAIN-SUFFIX,alchemy.com
 DOMAIN-SUFFIX,alchemyapi.io
 DOMAIN-SUFFIX,ankr.com
 DOMAIN-SUFFIX,ankr.network
-DOMAIN-SUFFIX,walletconnect.com
-DOMAIN-SUFFIX,walletconnect.org
-DOMAIN-SUFFIX,reown.com
-DOMAIN-SUFFIX,etherscan.io
-DOMAIN-SUFFIX,blockchair.com
-DOMAIN-SUFFIX,blockstream.info
-DOMAIN-SUFFIX,blockcypher.com
-DOMAIN-SUFFIX,blockchain.info
-DOMAIN-SUFFIX,uniswap.org
-DOMAIN-SUFFIX,solscan.io
-DOMAIN-SUFFIX,solana.com
-DOMAIN-SUFFIX,phantom.app
+DOMAIN-SUFFIX,quiknode.pro
+DOMAIN-SUFFIX,quicknode.com
+DOMAIN-SUFFIX,chainstack.com
+DOMAIN-SUFFIX,drpc.org
+DOMAIN-SUFFIX,llamarpc.com
+DOMAIN-SUFFIX,1rpc.io
+DOMAIN-SUFFIX,publicnode.com

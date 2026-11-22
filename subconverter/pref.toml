@@ -144,7 +144,7 @@ clash_use_new_field_name = true
 clash_proxies_style = "flow"
 
 # add Clash mode to sing-box rules, and add a GLOBAL group to end of outbounds
-singbox_add_clash_modes = true
+singbox_add_clash_modes = false
 
 [[node_pref.rename_node]]
 match = '\(?((x|X)?(\d+)(\.?\d+)?)((\s?倍率?)|(x|X))\)?'
