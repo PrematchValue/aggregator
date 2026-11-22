@@ -1,6 +1,15 @@
 # AUTO-GENERATED: trusted, service-filtered upstream supplement.
 # Source: https://ruleset.skk.moe/List/non_ip/stream.conf (SukkaW/Surge, AGPL-3.0)
 # Handwritten ../custom/ rules always take precedence.
-DOMAIN-SUFFIX,tiktokw.com
 DOMAIN-SUFFIX,tiktok.us
+DOMAIN-SUFFIX,muscdn.com
+DOMAIN-SUFFIX,musical.ly
+DOMAIN-SUFFIX,tiktok.com
+DOMAIN-SUFFIX,tiktokv.us
+DOMAIN-SUFFIX,ipstatp.com
 DOMAIN-SUFFIX,isnssdk.com
+DOMAIN-SUFFIX,tiktokv.com
+DOMAIN-SUFFIX,tiktokw.com
+DOMAIN-SUFFIX,ibytedtos.com
+DOMAIN-SUFFIX,tik-tokapi.com
+DOMAIN-SUFFIX,byteoversea.com

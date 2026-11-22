@@ -1,7 +1,35 @@
 # AUTO-GENERATED: trusted, service-filtered upstream supplement.
 # Source: https://ruleset.skk.moe/List/non_ip/stream.conf (SukkaW/Surge, AGPL-3.0)
 # Handwritten ../custom/ rules always take precedence.
-DOMAIN-SUFFIX,primevideo.tv
-DOMAIN-SUFFIX,discoveryplus.com
+DOMAIN-SUFFIX,hbo.com
+DOMAIN-SUFFIX,max.com
+DOMAIN-SUFFIX,scdn.co
+DOMAIN-SUFFIX,hulu.com
+DOMAIN-SUFFIX,jtvnw.net
+DOMAIN-SUFFIX,ttvnw.net
+DOMAIN-SUFFIX,twitch.tv
+DOMAIN-SUFFIX,dssott.com
+DOMAIN-SUFFIX,hbomax.com
+DOMAIN-SUFFIX,nflxso.net
+DOMAIN-SUFFIX,bamgrid.com
+DOMAIN-SUFFIX,netflix.com
+DOMAIN-SUFFIX,netflix.net
+DOMAIN-SUFFIX,nflxext.com
+DOMAIN-SUFFIX,nflximg.net
+DOMAIN-SUFFIX,spotify.com
+DOMAIN-SUFFIX,youtube.com
+DOMAIN-SUFFIX,nflxvideo.net
 DOMAIN-SUFFIX,peacocktv.com
+DOMAIN-SUFFIX,primevideo.tv
+DOMAIN-SUFFIX,twitchcdn.net
+DOMAIN-SUFFIX,disneyplus.com
+DOMAIN-SUFFIX,nflxsearch.net
+DOMAIN-SUFFIX,primevideo.com
+DOMAIN-SUFFIX,soundcloud.com
+DOMAIN-SUFFIX,spotifycdn.com
+DOMAIN-SUFFIX,amazonvideo.com
+DOMAIN-SUFFIX,disney-plus.net
+DOMAIN-SUFFIX,googlevideo.com
+DOMAIN-SUFFIX,discoveryplus.com
 DOMAIN-SUFFIX,paramountplus.com
+DOMAIN-SUFFIX,youtube-nocookie.com
