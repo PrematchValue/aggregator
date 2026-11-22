@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain_suffix": [
+        "apple.com",
+        "icloud.com",
+        "icloud-content.com",
+        "apple-cloudkit.com",
+        "apple-dns.net",
+        "itunes.com",
+        "mzstatic.com",
+        "aaplimg.com",
+        "cdn-apple.com",
+        "me.com",
+        "applemusic.com",
+        "apple.news",
+        "appldnld.apple.com"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain_suffix": [
+        "binance.com",
+        "binance.us",
+        "binance.org",
+        "okx.com",
+        "okex.com",
+        "bybit.com",
+        "bitget.com",
+        "gate.io",
+        "gate.com",
+        "coinbase.com",
+        "coinbasepro.com",
+        "kraken.com",
+        "bitfinex.com",
+        "kucoin.com",
+        "htx.com",
+        "huobi.com",
+        "crypto.com",
+        "coinex.com",
+        "bitstamp.net",
+        "gemini.com"
+      ]
+    }
+  ]
+}

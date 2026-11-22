@@ -1,0 +1,42 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain_suffix": [
+        "ledger.com",
+        "ledgerwallet.com",
+        "ledgerlive.com",
+        "trezor.io",
+        "safepal.com",
+        "safepal.io",
+        "onekey.so",
+        "keyst.one",
+        "keystonewallet.io",
+        "ellipal.com",
+        "coolwallet.io",
+        "metamask.io",
+        "rabby.io",
+        "trustwallet.com",
+        "phantom.app",
+        "solflare.com",
+        "imtoken.com",
+        "tokenpocket.pro",
+        "walletconnect.com",
+        "walletconnect.org",
+        "reown.com",
+        "infura.io",
+        "alchemy.com",
+        "alchemyapi.io",
+        "ankr.com",
+        "ankr.network",
+        "quiknode.pro",
+        "quicknode.com",
+        "chainstack.com",
+        "drpc.org",
+        "llamarpc.com",
+        "1rpc.io",
+        "publicnode.com"
+      ]
+    }
+  ]
+}

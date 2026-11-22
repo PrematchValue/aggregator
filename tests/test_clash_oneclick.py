@@ -55,7 +55,7 @@ class ClashOneClickTests(unittest.TestCase):
         module_path.insert(0, str(ROOT / 'subscribe'))
         from profile_layout import SERVICES
         rules = tomllib.loads((ROOT / 'subconverter/snippets/rulesets.toml').read_text(encoding='utf-8'))
-        names = set(SERVICES) | {'DIRECT', 'REJECT'}
+        names = set(SERVICES) | {'DIRECT', 'REJECT', '全球加速'}
         for rule in rules['rulesets']:
             self.assertIn(rule['group'], names)
         self.assertEqual(rules['rulesets'][-1]['ruleset'], '[]FINAL')

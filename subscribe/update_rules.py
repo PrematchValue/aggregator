@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RULES = ROOT / "subconverter/rules"
 AUTO = RULES / "auto"
 SOURCE_BASE = "https://ruleset.skk.moe/List/"
+GLOBAL_URL = "https://raw.githubusercontent.com/ConnersHua/RuleGo/master/Surge/Ruleset/Proxy.list"
 MAX_BYTES = 512 * 1024
 DOMAIN_RE = re.compile(r"^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$", re.I)
 
@@ -30,6 +31,8 @@ class Source:
     anchor: str
     minimum: int
     ip: bool = False
+    source_url: str = ""
+    global_proxy: bool = False
 
 
 SOURCES = (
@@ -73,11 +76,13 @@ SOURCES = (
     ), "DOMAIN-SUFFIX,telegram.org", 8),
     Source("TelegramIP.list", "ip/telegram.conf", "Telegram.list", (),
            "IP-CIDR,149.154.160.0/20,no-resolve", 7, True),
+    Source("GlobalProxy.list", "global/Proxy.list", "GlobalProxy.list", (),
+           "DOMAIN-SUFFIX,fbcdn.net", 25, False, GLOBAL_URL, True),
 )
 
 
 def download(url: str) -> str:
-    if not url.startswith(SOURCE_BASE):
+    if not (url.startswith(SOURCE_BASE) or url == GLOBAL_URL):
         raise ValueError("untrusted rule host")
     request = urllib.request.Request(url, headers={"User-Agent": "aggregator-rules/1.0"})
     with urllib.request.urlopen(request, timeout=25) as response:
@@ -114,22 +119,33 @@ def extract(spec: Source, source: str) -> list[str]:
                 continue
             normalized = f"{kind},{network},no-resolve"
         else:
-            if kind not in {"DOMAIN", "DOMAIN-SUFFIX"} or len(columns) < 2:
+            if len(columns) < 2:
                 continue
-            domain = columns[1].strip().lower().strip(".")
-            if len(domain) > 253 or ".." in domain or not DOMAIN_RE.fullmatch(domain):
+            if kind == "DOMAIN-KEYWORD" and spec.global_proxy:
+                token = columns[1].strip().lower()
+                if len(token) < 5 or not re.fullmatch(r"[a-z0-9._-]+", token):
+                    continue
+                normalized = f"{kind},{token}"
+            elif kind in {"DOMAIN", "DOMAIN-SUFFIX"}:
+                domain = columns[1].strip().lower().strip(".")
+                if len(domain) > 253 or ".." in domain or not DOMAIN_RE.fullmatch(domain):
+                    continue
+                if "7h15.ru1353t" in domain:  # upstream tracking sentinel
+                    continue
+                if spec.global_proxy:
+                    if domain.endswith((".cn", ".local")) or domain in {"cn", "localhost"}:
+                        continue
+                elif not any(domain == root or domain.endswith("." + root) for root in spec.allow):
+                    continue
+                normalized = f"{kind},{domain}"
+            else:
                 continue
-            if "7h15.ru1353t" in domain:  # upstream tracking sentinel
-                continue
-            if not any(domain == root or domain.endswith("." + root) for root in spec.allow):
-                continue
-            normalized = f"{kind},{domain}"
         if normalized not in seen:
             result.append(normalized)
             seen.add(normalized)
     if spec.anchor not in seen:
         raise ValueError(f"missing required anchor: {spec.anchor}")
-    if len(result) < spec.minimum or len(result) > 400:
+    if len(result) < spec.minimum or len(result) > (800 if spec.global_proxy else 400):
         raise ValueError(f"unexpected rule count: {len(result)}")
     return result
 
@@ -156,8 +172,9 @@ def snapshot(spec: Source, source: str, *, base_text: str = "") -> str:
         filtered.append(rule)
     if not filtered:
         raise ValueError("no nonredundant rules; retain previous snapshot")
+    source = spec.source_url or SOURCE_BASE + spec.remote_path
     return ("# AUTO-GENERATED: trusted, service-filtered upstream supplement.\n"
-            f"# Source: {SOURCE_BASE}{spec.remote_path} (SukkaW/Surge, AGPL-3.0)\n"
+            f"# Source: {source} (SukkaW/Surge or ConnersHua/RuleGo)\n"
             "# Handwritten ../custom/ rules always take precedence.\n"
             + "\n".join(filtered) + "\n")
 
@@ -165,10 +182,10 @@ def snapshot(spec: Source, source: str, *, base_text: str = "") -> str:
 def validate_snapshot_file(spec: Source, text: str) -> None:
     if not text.startswith("# AUTO-GENERATED:"):
         raise ValueError(f"{spec.filename}: missing origin marker")
-    if f"{SOURCE_BASE}{spec.remote_path}" not in text:
+    if (spec.source_url or SOURCE_BASE + spec.remote_path) not in text:
         raise ValueError(f"{spec.filename}: invalid origin")
     rows = [x.strip() for x in text.splitlines() if x.strip() and not x.startswith("#")]
-    if not rows or len(rows) != len(set(rows)) or len(rows) > 400:
+    if not rows or len(rows) != len(set(rows)) or len(rows) > (800 if spec.global_proxy else 400):
         raise ValueError(f"{spec.filename}: empty/duplicated/oversized snapshot")
     for row in rows:
         parts = row.split(",")
@@ -182,10 +199,15 @@ def validate_snapshot_file(spec: Source, text: str) -> None:
             if len(parts) != 3 or (parts[0] == "IP-CIDR") != (address.version == 4):
                 raise ValueError(f"{spec.filename}: IP family mismatch")
         else:
-            if parts[0] not in ("DOMAIN", "DOMAIN-SUFFIX") or len(parts) != 2:
+            if parts[0] not in (("DOMAIN", "DOMAIN-SUFFIX", "DOMAIN-KEYWORD")
+                                  if spec.global_proxy else ("DOMAIN", "DOMAIN-SUFFIX")) or len(parts) != 2:
                 raise ValueError(f"{spec.filename}: unsupported rule {row!r}")
             domain = parts[1]
-            if not DOMAIN_RE.fullmatch(domain) or ".." in domain or not any(
+            if spec.global_proxy:
+                if not re.fullmatch(r"[a-z0-9._-]+", domain) or (
+                        parts[0] != "DOMAIN-KEYWORD" and (domain.endswith(".cn") or ".." in domain)):
+                    raise ValueError(f"{spec.filename}: invalid general proxy rule {row!r}")
+            elif not DOMAIN_RE.fullmatch(domain) or ".." in domain or not any(
                     domain == root or domain.endswith("." + root) for root in spec.allow):
                 raise ValueError(f"{spec.filename}: out-of-category rule {row!r}")
 
@@ -197,9 +219,10 @@ def update(root: Path = ROOT, downloader=download) -> dict[str, str]:
         dst = root / "subconverter/rules/auto" / spec.filename
         base = root / "subconverter/rules/custom" / spec.base_filename
         try:
-            if spec.remote_path not in cache:
-                cache[spec.remote_path] = downloader(SOURCE_BASE + spec.remote_path)
-            new = snapshot(spec, cache[spec.remote_path], base_text=base.read_text("utf-8"))
+            url = spec.source_url or SOURCE_BASE + spec.remote_path
+            if url not in cache:
+                cache[url] = downloader(url)
+            new = snapshot(spec, cache[url], base_text=base.read_text("utf-8"))
             validate_snapshot_file(spec, new)
             old = dst.read_text("utf-8")
             validate_snapshot_file(spec, old)

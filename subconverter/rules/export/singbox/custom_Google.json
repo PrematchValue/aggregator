@@ -1,0 +1,26 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain_suffix": [
+        "google.com",
+        "google.com.hk",
+        "google.com.tw",
+        "google.co.jp",
+        "googleapis.com",
+        "gstatic.com",
+        "googleusercontent.com",
+        "ggpht.com",
+        "gmail.com",
+        "googlemail.com",
+        "googledrive.com",
+        "google-analytics.com",
+        "gvt1.com",
+        "gvt2.com",
+        "gvt3.com",
+        "android.com",
+        "withgoogle.com"
+      ]
+    }
+  ]
+}

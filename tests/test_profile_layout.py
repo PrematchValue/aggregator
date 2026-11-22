@@ -109,7 +109,7 @@ class PolicyLayoutTests(unittest.TestCase):
         data = tomllib.loads((ROOT / 'subconverter/snippets/rulesets.toml').read_text())
         groups = {r['group'] for r in data['rulesets']}
         self.assertTrue(set(SERVICES) - {'漏网之鱼'} <= groups)
-        self.assertTrue(groups <= set(SERVICES) | {'DIRECT', 'REJECT'})
+        self.assertTrue(groups <= set(SERVICES) | {'DIRECT', 'REJECT', '全球加速'})
         for r in data['rulesets']:
             if not r['ruleset'].startswith('[]'):
                 self.assertTrue((ROOT / 'subconverter' / r['ruleset']).is_file(), r)

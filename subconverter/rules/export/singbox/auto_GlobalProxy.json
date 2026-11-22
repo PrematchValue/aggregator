@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain_suffix": [
+        "fbcdn.net",
+        "facebookmail.com",
+        "cdninstagram.com",
+        "instagram.com",
+        "whatsapp.com",
+        "whatsapp.net",
+        "500px.com",
+        "9cache.com",
+        "9gag.com"
+      ]
+    },
+    {
+      "domain_keyword": [
+        ".facebook."
+      ]
+    }
+  ]
+}

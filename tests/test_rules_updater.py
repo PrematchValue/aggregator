@@ -18,7 +18,7 @@ from singbox_layout import apply_singbox_layout
 class RuleUpdaterTests(unittest.TestCase):
     def test_committed_rule_snapshots_are_safe(self):
         check(ROOT)
-        self.assertEqual(len(SOURCES), 6)
+        self.assertEqual(len(SOURCES), 7)
         registry = (ROOT / "subconverter/snippets/rulesets.toml").read_text("utf-8")
         self.assertIn('rules/auto/AI.list', registry)
         self.assertIn('rules/auto/TelegramIP.list', registry)
@@ -71,7 +71,7 @@ class RuleUpdaterTests(unittest.TestCase):
             def failed(url):
                 raise OSError('source offline')
             results = update(root, failed)
-            self.assertEqual(len(results), 6)
+            self.assertEqual(len(results), 7)
             self.assertTrue(all('retained previous' in v for v in results.values()))
             for spec in SOURCES:
                 self.assertEqual((root / 'subconverter/rules/auto' / spec.filename).read_bytes(),

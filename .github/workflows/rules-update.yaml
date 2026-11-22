@@ -35,8 +35,10 @@ jobs:
           sed 's/^/- /' /tmp/rule-update.log >> "$GITHUB_STEP_SUMMARY"
           python -m pip install -r requirements.txt
           python -u subscribe/update_rules.py
+          python -u subscribe/external_rule_sets.py --write
+          python -u subscribe/external_rule_sets.py
           python -m unittest discover -s tests -q
-          git add -- subconverter/rules/auto
+          git add -- subconverter/rules/auto subconverter/rules/export/singbox
           if git diff --cached --quiet; then
             echo '没有需要提交的规则变化' >> "$GITHUB_STEP_SUMMARY"
             exit 0

@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain_suffix": [
+        "bilibili.tv",
+        "bstarstatic.com"
+      ]
+    },
+    {
+      "domain": [
+        "api.bilibili.com",
+        "app.bilibili.com",
+        "upos-hz-mirrorakam.akamaized.net",
+        "upos-sz-mirrorakam.akamaized.net"
+      ]
+    }
+  ]
+}

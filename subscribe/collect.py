@@ -375,6 +375,9 @@ def aggregate(args: argparse.Namespace) -> None:
                 with open(filepath, encoding="utf-8") as rendered:
                     profile = rendered.read()
                 updated = apply_profile_layout(profile, target_name)
+                from external_rule_sets import externalize_clash, externalize_surge
+                updated = (externalize_clash(updated) if target_name == 'clash'
+                           else externalize_surge(updated))
                 with open(filepath, "w", encoding="utf-8") as rendered:
                     rendered.write(updated)
 
@@ -383,6 +386,8 @@ def aggregate(args: argparse.Namespace) -> None:
                 with open(filepath, encoding="utf-8") as source_file:
                     profile = source_file.read()
                 updated = apply_singbox_layout(profile)
+                from external_rule_sets import externalize_singbox
+                updated = externalize_singbox(updated)
                 with open(filepath, "w", encoding="utf-8") as output_file:
                     output_file.write(updated)
 

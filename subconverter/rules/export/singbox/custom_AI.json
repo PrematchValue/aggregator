@@ -1,0 +1,34 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain_suffix": [
+        "chatgpt.com",
+        "openai.com",
+        "oaistatic.com",
+        "oaiusercontent.com",
+        "auth0.openai.com",
+        "anthropic.com",
+        "claude.ai",
+        "claude.com",
+        "perplexity.ai",
+        "grok.com",
+        "x.ai",
+        "copilot.cloud.microsoft",
+        "poe.com",
+        "character.ai",
+        "mistral.ai",
+        "deepseek.com"
+      ]
+    },
+    {
+      "domain": [
+        "gemini.google.com",
+        "aistudio.google.com",
+        "bard.google.com",
+        "generativelanguage.googleapis.com",
+        "copilot.microsoft.com"
+      ]
+    }
+  ]
+}

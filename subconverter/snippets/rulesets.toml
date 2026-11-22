@@ -79,6 +79,14 @@ group = "Telegram"
 ruleset = "rules/auto/TelegramIP.list"
 
 [[rulesets]]
+group = "全球加速"
+ruleset = "rules/custom/GlobalProxy.list"
+
+[[rulesets]]
+group = "全球加速"
+ruleset = "rules/auto/GlobalProxy.list"
+
+[[rulesets]]
 group = "DIRECT"
 ruleset = "[]GEOIP,CN"
 

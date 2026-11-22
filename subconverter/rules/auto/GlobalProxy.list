@@ -1,0 +1,13 @@
+# AUTO-GENERATED: trusted, service-filtered upstream supplement.
+# Source: https://raw.githubusercontent.com/ConnersHua/RuleGo/master/Surge/Ruleset/Proxy.list (ConnersHua/RuleGo)
+# Handwritten ../custom/ rules always take precedence.
+DOMAIN-SUFFIX,fbcdn.net
+DOMAIN-SUFFIX,facebookmail.com
+DOMAIN-SUFFIX,cdninstagram.com
+DOMAIN-SUFFIX,instagram.com
+DOMAIN-SUFFIX,whatsapp.com
+DOMAIN-SUFFIX,whatsapp.net
+DOMAIN-KEYWORD,.facebook.
+DOMAIN-SUFFIX,500px.com
+DOMAIN-SUFFIX,9cache.com
+DOMAIN-SUFFIX,9gag.com

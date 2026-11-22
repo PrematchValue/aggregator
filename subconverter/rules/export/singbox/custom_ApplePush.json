@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain_suffix": [
+        "push.apple.com",
+        "aps.apple.com"
+      ]
+    },
+    {
+      "domain": [
+        "courier.push.apple.com",
+        "api.push.apple.com"
+      ]
+    }
+  ]
+}

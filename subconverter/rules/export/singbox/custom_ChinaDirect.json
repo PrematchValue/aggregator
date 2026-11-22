@@ -1,0 +1,39 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain_suffix": [
+        "cn",
+        "local",
+        "lan",
+        "home.arpa",
+        "baidu.com",
+        "qq.com",
+        "weixin.qq.com",
+        "wechat.com",
+        "alicdn.com",
+        "alipay.com",
+        "taobao.com",
+        "tmall.com",
+        "jd.com",
+        "163.com",
+        "126.com",
+        "netease.com",
+        "iqiyi.com",
+        "youku.com",
+        "bilibili.com",
+        "bilivideo.com",
+        "hdslb.com",
+        "douyin.com",
+        "douyincdn.com",
+        "ixigua.com",
+        "xiaohongshu.com",
+        "zhihu.com",
+        "mi.com",
+        "miui.com",
+        "amap.com",
+        "autonavi.com"
+      ]
+    }
+  ]
+}
