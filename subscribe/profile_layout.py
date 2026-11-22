@@ -15,7 +15,7 @@ ICONS = {
     "全球加速": "Global.png",
     "苹果服务": "Apple.png",
     "苹果推送": "iCloud.png",
-    "Google服务": "Google.png",
+    "Google服务": "Google_Search.png",
     "国际媒体": "Streaming.png",
     "港台番剧": "bilibili_3.png",
     "AI服务": "AI.png",
@@ -26,6 +26,7 @@ ICONS = {
     "漏网之鱼": "Final.png",
     "香港节点": "Hong_Kong.png",
     "台湾节点": "Taiwan.png",
+    "狮城节点": "Singapore.png",
     "日本节点": "Japan.png",
     "美国节点": "United_States.png",
     "特殊节点": "Available.png",
@@ -37,6 +38,7 @@ SERVICES = (
 REGIONS = (
     ("香港节点", "🇭🇰 香港 "),
     ("台湾节点", "🇹🇼 台湾 "),
+    ("狮城节点", "🇸🇬 新加坡 "),
     ("日本节点", "🇯🇵 日本 "),
     ("美国节点", "🇺🇸 美国 "),
 )
@@ -53,7 +55,7 @@ def region_of(name: str) -> str:
 def build_members(names: list[str]) -> tuple[list[str], dict[str, list[str]]]:
     if not names or len(names) != len(set(names)):
         raise ValueError("empty or duplicate proxy names")
-    if any(n in ICONS or n in {"DIRECT", "REJECT"} for n in names):
+    if any(n in ICONS or n in {"DIRECT", "REJECT", "国内直连"} for n in names):
         raise ValueError("proxy name conflicts with policy group")
     by_region: dict[str, list[str]] = {group: [] for group, _ in REGIONS}
     by_region[SPECIAL] = []
@@ -71,13 +73,17 @@ def groups_for_clash(names: list[str]) -> list[dict]:
     enabled, by_region = build_members(names)
     groups = [{"name": "全球加速", "type": "select", "proxies": enabled,
                "icon": ICON_BASE + ICONS["全球加速"]}]
-    common = ["全球加速", *enabled, "DIRECT"]
+    common = [*enabled, "国内直连"]
     for name in SERVICES:
         groups.append({"name": name, "type": "select", "proxies": common,
                        "icon": ICON_BASE + ICONS[name]})
     for name in enabled:
-        groups.append({"name": name, "type": "select", "proxies": by_region[name],
-                       "icon": ICON_BASE + ICONS[name]})
+        group = {"name": name, "type": "select", "proxies": by_region[name],
+                 "icon": ICON_BASE + ICONS[name]}
+        if name != SPECIAL:
+            group.update(type="url-test", url="https://www.gstatic.com/generate_204",
+                         interval=600, tolerance=50, lazy=True)
+        groups.append(group)
     return groups
 
 
@@ -105,6 +111,39 @@ def _replace_yaml_root_group(text: str, groups: list[dict]) -> str:
     return "".join(lines)
 
 
+def _add_clash_direct_alias(text: str) -> str:
+    """Append a native Mihomo direct proxy without altering real proxy entries."""
+    lines = text.splitlines(keepends=True)
+    headers = [i for i, line in enumerate(lines)
+               if re.fullmatch(r"(?:proxies|Proxy):[ \t]*\r?\n?", line)]
+    if len(headers) != 1:
+        raise ValueError("Clash proxy list must use a single block-style root")
+    a = headers[0]
+    b = next((i for i in range(a + 1, len(lines))
+              if re.match(r"^[A-Za-z][^\n]*:", lines[i])), len(lines))
+    if b <= a + 1:
+        raise ValueError("empty Clash proxy block")
+    # Group generation is already complete. A native outbound alias is not a group.
+    first = next((re.match(r"^([ 	]*)-\s", line) for line in lines[a + 1:b]
+                  if re.match(r"^[ 	]*-\s", line)), None)
+    if first is None:
+        raise ValueError("Clash proxy entries must use a block list")
+    indent = first.group(1)
+    alias = f"{indent}- name: 国内直连\n{indent}  type: direct\n"
+    lines.insert(b, alias)
+    return "".join(lines)
+
+
+def _add_surge_direct_alias(text: str) -> str:
+    """Surge built-in policy alias: one [Proxy] line, no extra selector."""
+    if re.search(r"(?m)^国内直连[ \t]*=", text):
+        raise ValueError("duplicate 国内直连 policy")
+    marker = "[Proxy]\n"
+    if text.count(marker) != 1:
+        raise ValueError("expected one [Proxy] section")
+    return text.replace(marker, marker + "国内直连 = direct\n", 1)
+
+
 def _clash_layout(text: str) -> str:
     obj = yaml.safe_load(text)
     if not isinstance(obj, dict):
@@ -116,9 +155,11 @@ def _clash_layout(text: str) -> str:
     if len(names) != len(proxies) or not all(isinstance(n, str) and n for n in names):
         raise ValueError("invalid Clash proxy name")
     result = _replace_yaml_root_group(text, groups_for_clash(names))
+    result = _add_clash_direct_alias(result)
     changed = yaml.safe_load(result)
-    if changed.get("proxies", changed.get("Proxy")) != proxies:
-        raise ValueError("node definitions changed while generating groups")
+    changed_proxies = changed.get("proxies", changed.get("Proxy"))
+    if changed_proxies != [*proxies, {"name": "国内直连", "type": "direct"}]:
+        raise ValueError("node definitions changed while adding direct alias")
     if changed.get("rules", changed.get("Rule")) != obj.get("rules", obj.get("Rule")):
         raise ValueError("routing rules changed while generating groups")
     if changed.get("dns") != obj.get("dns"):
@@ -149,22 +190,25 @@ def _surge_layout(text: str) -> str:
     icon = lambda name: f"icon-url={ICON_BASE}{ICONS[name]}"
     group_lines = ["[Proxy Group]",
                    "全球加速 = select, " + ", ".join([*enabled, icon("全球加速")])]
-    service_members = ", ".join(["全球加速", *enabled, "DIRECT"])
+    service_members = ", ".join([*enabled, "国内直连"])
     group_lines.extend(f"{name} = select, {service_members}, {icon(name)}" for name in SERVICES)
     for name in enabled:
         if name == SPECIAL:
-            excluded = "|".join(prefix for _, prefix in REGIONS)
+            excluded = "|".join([*(prefix for _, prefix in REGIONS), "国内直连$"])
             pattern = f"^(?!(?:{excluded}))"
         else:
             pattern = "^" + next(p for n, p in REGIONS if n == name)
-        group_lines.append(f"{name} = select, include-all-proxies=true, "
+        kind = "select" if name == SPECIAL else "smart"
+        group_lines.append(f"{name} = {kind}, include-all-proxies=true, "
                            f"policy-regex-filter={pattern}, {icon(name)}")
     replacement = "\n".join(group_lines) + "\n\n"
     existing = next(((a, b) for n, a, b in sections if n == "proxy group"), None)
     if existing:
-        return text[:existing[0]] + replacement + text[existing[1]:]
-    rule_start = next(a for n, a, _ in sections if n == "rule")
-    return text[:rule_start] + replacement + text[rule_start:]
+        updated = text[:existing[0]] + replacement + text[existing[1]:]
+    else:
+        rule_start = next(a for n, a, _ in sections if n == "rule")
+        updated = text[:rule_start] + replacement + text[rule_start:]
+    return _add_surge_direct_alias(updated)
 
 
 def apply_profile_layout(profile: str, target: str) -> str:

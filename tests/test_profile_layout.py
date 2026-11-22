@@ -10,8 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "subscribe"))
 from profile_layout import ICONS, SERVICES, apply_profile_layout
 
-NAMES = ["🇭🇰 香港 001", "🇹🇼 台湾 001", "🇯🇵 日本 001",
-         "🇺🇸 美国 001", "🇸🇬 新加坡 001"]
+NAMES = ["🇭🇰 香港 001", "🇹🇼 台湾 001", "🇸🇬 新加坡 001",
+         "🇯🇵 日本 001", "🇺🇸 美国 001", "🇩🇪 德国 001"]
 
 
 class PolicyLayoutTests(unittest.TestCase):
@@ -25,19 +25,31 @@ class PolicyLayoutTests(unittest.TestCase):
         after = yaml.safe_load(apply_profile_layout(original, "clash"))
         groups = {g["name"]: g for g in after["proxy-groups"]}
         self.assertEqual(groups["全球加速"]["proxies"],
-                         ["香港节点", "台湾节点", "日本节点", "美国节点", "特殊节点"])
+                         ["香港节点", "台湾节点", "狮城节点", "日本节点", "美国节点", "特殊节点"])
         for name in SERVICES:
             self.assertEqual(groups[name]["proxies"],
-                             ["全球加速", "香港节点", "台湾节点", "日本节点", "美国节点",
-                              "特殊节点", "DIRECT"])
-        for name, expected in zip(["香港节点", "台湾节点", "日本节点", "美国节点", "特殊节点"], NAMES):
+                             ["香港节点", "台湾节点", "狮城节点", "日本节点", "美国节点",
+                              "特殊节点", "国内直连"])
+        for name, expected in zip(["香港节点", "台湾节点", "狮城节点", "日本节点", "美国节点", "特殊节点"], NAMES):
             self.assertEqual(groups[name]["proxies"], [expected])
+        self.assertEqual(after["proxies"][-1], {"name": "国内直连", "type": "direct"})
+        self.assertEqual(len(after["proxies"]), len(NAMES) + 1)
+        self.assertNotIn("全球加速", groups["AI服务"]["proxies"])
+        self.assertNotIn("DIRECT", groups["AI服务"]["proxies"])
+        self.assertNotIn("国内直连", groups["全球加速"]["proxies"])
+        self.assertTrue(groups["Google服务"]["icon"].endswith("/Google_Search.png"))
+        for region in ("香港节点", "台湾节点", "狮城节点", "日本节点", "美国节点"):
+            self.assertEqual(groups[region]["type"], "url-test")
+            self.assertEqual(groups[region]["interval"], 600)
+            self.assertEqual(groups[region]["url"], "https://www.gstatic.com/generate_204")
+        self.assertEqual(groups["特殊节点"]["type"], "select")
+        self.assertEqual(groups["全球加速"]["type"], "select")
         self.assertEqual(after["dns"], {"nameserver": ["223.5.5.5"]})
         self.assertEqual(after["rules"], ["FINAL,漏网之鱼"])
         self.assertEqual(len(groups), len(ICONS))
         for name, group in groups.items():
             self.assertRegex(group["icon"], r"^https://.+\.png$")
-            self.assertNotRegex(name, r"[🇭🇰🇹🇼🇯🇵🇺🇸🔰♻️🎯]")
+            self.assertNotRegex(name, r"[🇭🇰🇹🇼🇸🇬🇯🇵🇺🇸🔰♻️🎯]")
 
     def test_surge_uses_compact_group_filters_not_thousands_of_node_names(self):
         lines = "\n".join(f"{name} = ss, example.org, 443, encrypt-method=aes-128-gcm, password=x"
@@ -49,9 +61,15 @@ class PolicyLayoutTests(unittest.TestCase):
         self.assertNotIn("Old = select", result)
         self.assertIn("[General]\ndns-server = 223.5.5.5", result)
         self.assertIn("[Rule]\nFINAL,漏网之鱼", result)
-        self.assertIn("全球加速 = select, 香港节点, 台湾节点, 日本节点, 美国节点, 特殊节点, icon-url=", result)
+        self.assertIn("全球加速 = select, 香港节点, 台湾节点, 狮城节点, 日本节点, 美国节点, 特殊节点, icon-url=", result)
         self.assertIn("特殊节点 = select, include-all-proxies=true, policy-regex-filter=", result)
-        self.assertIn("香港节点 = select, include-all-proxies=true, policy-regex-filter=^🇭🇰", result)
+        self.assertIn("狮城节点 = smart, include-all-proxies=true, policy-regex-filter=^🇸🇬 新加坡", result)
+        self.assertIn("国内直连 = direct", result)
+        self.assertNotIn("国内直连 = select", result)
+        self.assertIn("AI服务 = select, 香港节点, 台湾节点, 狮城节点, 日本节点, 美国节点, 特殊节点, 国内直连, icon-url=", result)
+        self.assertNotIn("AI服务 = select, 全球加速", result)
+        self.assertIn("国内直连$", result)
+        self.assertIn("香港节点 = smart, include-all-proxies=true, policy-regex-filter=^🇭🇰", result)
         self.assertEqual(result.count("icon-url="), len(ICONS))
         self.assertNotIn("全球直连", result)
         self.assertIn("🇭🇰 香港 001 = ss,", result)
@@ -63,7 +81,8 @@ class PolicyLayoutTests(unittest.TestCase):
         groups = {g["name"]: g for g in result["proxy-groups"]}
         self.assertEqual(groups["全球加速"]["proxies"], ["日本节点"])
         self.assertNotIn("香港节点", groups)
-        self.assertIn("DIRECT", groups["苹果推送"]["proxies"])
+        self.assertEqual(groups["苹果推送"]["proxies"], ["日本节点", "国内直连"])
+        self.assertEqual(result["proxies"][-1], {"name": "国内直连", "type": "direct"})
 
     def test_reject_duplicate_proxy_names_and_bad_profiles(self):
         source = yaml.safe_dump({"proxies": [{"name": "A"}, {"name": "A"}],
