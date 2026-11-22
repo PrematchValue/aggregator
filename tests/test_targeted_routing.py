@@ -80,6 +80,7 @@ class TargetedRoutingTests(unittest.TestCase):
         self.assertEqual(tags["香港节点"]["type"], "urltest")
         self.assertEqual(tags["特殊节点"]["type"], "selector")
         self.assertEqual(tags["冷钱包"]["outbounds"][-1], "DIRECT")
+        self.assertEqual(tags["漏网之鱼"]["outbounds"], ["全球加速", "DIRECT"])
         self.assertNotIn("国内直连", tags)
         self.assertNotIn("REJECT", tags)
         self.assertNotIn("GLOBAL", tags)

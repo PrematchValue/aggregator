@@ -69,13 +69,26 @@ def build_members(names: list[str]) -> tuple[list[str], dict[str, list[str]]]:
     return enabled, by_region
 
 
+def service_choices(name: str, enabled: list[str], direct: str) -> list[str]:
+    """Move only the requested first choice; retain all other relative order."""
+    if name == "漏网之鱼":
+        return ["全球加速", direct]
+    choices = [*enabled, direct]
+    first = {"苹果服务": direct, "港台番剧": direct,
+             "AI服务": "日本节点", "TikTok": "日本节点"}.get(name)
+    if first in choices:
+        choices.remove(first)
+        choices.insert(0, first)
+    return choices
+
+
 def groups_for_clash(names: list[str]) -> list[dict]:
     enabled, by_region = build_members(names)
     groups = [{"name": "全球加速", "type": "select", "proxies": enabled,
                "icon": ICON_BASE + ICONS["全球加速"]}]
-    common = [*enabled, "国内直连"]
     for name in SERVICES:
-        groups.append({"name": name, "type": "select", "proxies": common,
+        groups.append({"name": name, "type": "select",
+                       "proxies": service_choices(name, enabled, "国内直连"),
                        "icon": ICON_BASE + ICONS[name]})
     for name in enabled:
         group = {"name": name, "type": "select", "proxies": by_region[name],
@@ -190,8 +203,10 @@ def _surge_layout(text: str) -> str:
     icon = lambda name: f"icon-url={ICON_BASE}{ICONS[name]}"
     group_lines = ["[Proxy Group]",
                    "全球加速 = select, " + ", ".join([*enabled, icon("全球加速")])]
-    service_members = ", ".join([*enabled, "国内直连"])
-    group_lines.extend(f"{name} = select, {service_members}, {icon(name)}" for name in SERVICES)
+    group_lines.extend(
+        f"{name} = select, {', '.join(service_choices(name, enabled, '国内直连'))}, {icon(name)}"
+        for name in SERVICES
+    )
     for name in enabled:
         if name == SPECIAL:
             excluded = "|".join([*(prefix for _, prefix in REGIONS), "国内直连$"])

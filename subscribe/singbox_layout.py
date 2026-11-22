@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 
-from profile_layout import SERVICES, SPECIAL, build_members
+from profile_layout import SERVICES, SPECIAL, build_members, service_choices
 
 _SPECIAL_TYPES = frozenset({"direct", "block", "dns", "selector", "urltest"})
 
@@ -72,8 +72,8 @@ def apply_singbox_layout(text: str) -> str:
         doc["outbounds"].insert(0, {"type": "direct", "tag": "DIRECT"})
 
     extra = [{"type": "selector", "tag": "全球加速", "outbounds": enabled}]
-    choices = [*enabled, "DIRECT"]
-    extra.extend({"type": "selector", "tag": name, "outbounds": choices}
+    extra.extend({"type": "selector", "tag": name,
+                  "outbounds": service_choices(name, enabled, "DIRECT")}
                  for name in SERVICES)
     for name in enabled:
         group = {"type": "selector", "tag": name, "outbounds": members[name]}

@@ -1,0 +1,7 @@
+# AUTO-GENERATED: trusted, service-filtered upstream supplement.
+# Source: https://ruleset.skk.moe/List/non_ip/apple_services.conf (SukkaW/Surge, AGPL-3.0)
+# Handwritten ../custom/ rules always take precedence.
+DOMAIN-SUFFIX,appstore.com
+DOMAIN-SUFFIX,apple-mapkit.com
+DOMAIN-SUFFIX,organicfruitapps.com
+DOMAIN-SUFFIX,appsto.re

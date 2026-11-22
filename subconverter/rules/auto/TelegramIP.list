@@ -1,0 +1,5 @@
+# AUTO-GENERATED: trusted, service-filtered upstream supplement.
+# Source: https://ruleset.skk.moe/List/ip/telegram.conf (SukkaW/Surge, AGPL-3.0)
+# Handwritten ../custom/ rules always take precedence.
+IP-CIDR,95.161.64.0/20,no-resolve
+IP-CIDR,194.221.250.50/32,no-resolve

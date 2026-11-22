@@ -1,0 +1,7 @@
+# AUTO-GENERATED: trusted, service-filtered upstream supplement.
+# Source: https://ruleset.skk.moe/List/non_ip/telegram.conf (SukkaW/Surge, AGPL-3.0)
+# Handwritten ../custom/ rules always take precedence.
+DOMAIN-SUFFIX,cdn-telegram.org
+DOMAIN-SUFFIX,tdesktop.com
+DOMAIN-SUFFIX,telegram.space
+DOMAIN-SUFFIX,tx.me

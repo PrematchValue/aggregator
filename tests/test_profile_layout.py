@@ -26,10 +26,17 @@ class PolicyLayoutTests(unittest.TestCase):
         groups = {g["name"]: g for g in after["proxy-groups"]}
         self.assertEqual(groups["全球加速"]["proxies"],
                          ["香港节点", "台湾节点", "日本节点", "狮城节点", "美国节点", "特殊节点"])
+        normal = ["香港节点", "台湾节点", "日本节点", "狮城节点", "美国节点",
+                  "特殊节点", "国内直连"]
+        expected = {
+            "苹果服务": ["国内直连", *normal[:-1]],
+            "港台番剧": ["国内直连", *normal[:-1]],
+            "AI服务": ["日本节点", *[x for x in normal if x != "日本节点"]],
+            "TikTok": ["日本节点", *[x for x in normal if x != "日本节点"]],
+            "漏网之鱼": ["全球加速", "国内直连"],
+        }
         for name in SERVICES:
-            self.assertEqual(groups[name]["proxies"],
-                             ["香港节点", "台湾节点", "日本节点", "狮城节点", "美国节点",
-                              "特殊节点", "国内直连"])
+            self.assertEqual(groups[name]["proxies"], expected.get(name, normal))
         for name, expected in zip(["香港节点", "台湾节点", "日本节点", "狮城节点", "美国节点", "特殊节点"], NAMES):
             self.assertEqual(groups[name]["proxies"], [expected])
         self.assertEqual(after["proxies"][-1], {"name": "国内直连", "type": "direct"})
@@ -66,7 +73,12 @@ class PolicyLayoutTests(unittest.TestCase):
         self.assertIn("狮城节点 = smart, include-all-proxies=true, policy-regex-filter=^🇸🇬 新加坡", result)
         self.assertIn("国内直连 = direct", result)
         self.assertNotIn("国内直连 = select", result)
-        self.assertIn("AI服务 = select, 香港节点, 台湾节点, 日本节点, 狮城节点, 美国节点, 特殊节点, 国内直连, icon-url=", result)
+        self.assertIn("AI服务 = select, 日本节点, 香港节点, 台湾节点, 狮城节点, 美国节点, 特殊节点, 国内直连, icon-url=", result)
+        self.assertIn("苹果服务 = select, 国内直连, 香港节点, 台湾节点, 日本节点, 狮城节点, 美国节点, 特殊节点, icon-url=", result)
+        self.assertIn("港台番剧 = select, 国内直连, 香港节点, 台湾节点, 日本节点, 狮城节点, 美国节点, 特殊节点, icon-url=", result)
+        self.assertIn("TikTok = select, 日本节点, 香港节点, 台湾节点, 狮城节点, 美国节点, 特殊节点, 国内直连, icon-url=", result)
+        self.assertIn("漏网之鱼 = select, 全球加速, 国内直连, icon-url=", result)
+        self.assertIn("苹果推送 = select, 香港节点, 台湾节点, 日本节点, 狮城节点, 美国节点, 特殊节点, 国内直连, icon-url=", result)
         self.assertNotIn("AI服务 = select, 全球加速", result)
         self.assertIn("国内直连$", result)
         self.assertIn("香港节点 = smart, include-all-proxies=true, policy-regex-filter=^🇭🇰", result)

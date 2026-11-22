@@ -1,0 +1,236 @@
+"""Conservative, persisted, service-specific rule snapshots from trusted sources.
+
+Never overwrite the handwritten rules. An invalid/unreachable source retains
+its previous committed snapshot; a separate daily workflow commits valid diffs.
+Data are from SukkaW/Surge, AGPL-3.0: https://github.com/SukkaW/Surge
+"""
+from __future__ import annotations
+
+import argparse
+import ipaddress
+import re
+import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+RULES = ROOT / "subconverter/rules"
+AUTO = RULES / "auto"
+SOURCE_BASE = "https://ruleset.skk.moe/List/"
+MAX_BYTES = 512 * 1024
+DOMAIN_RE = re.compile(r"^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$", re.I)
+
+
+@dataclass(frozen=True)
+class Source:
+    filename: str
+    remote_path: str
+    base_filename: str
+    allow: tuple[str, ...]
+    anchor: str
+    minimum: int
+    ip: bool = False
+
+
+SOURCES = (
+    Source("AI.list", "non_ip/ai.conf", "AI.list", (
+        "openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com",
+        "anthropic.com", "claude.com", "claude.ai", "perplexity.ai",
+        "grok.com", "x.ai", "poe.com", "meta.ai", "sora.com",
+        "chat.com", "groq.com", "openrouter.ai", "gemini.google", "gemini.google.com",
+        "aistudio.google.com", "generativelanguage.googleapis.com",
+        "notebooklm.google", "notebooklm.google.com", "generativeai.google",
+        "deepmind.google", "geller-pa.googleapis.com", "dify.ai", "jasper.ai",
+        "cursor.sh", "clau.de", "g.ai", "ai.com", "clipdrop.co",
+        "chatgpt.site", "cloudcode-pa.googleapis.com", "proactivebackend-pa.googleapis.com",
+    ), "DOMAIN-SUFFIX,chatgpt.com", 9),
+    Source("AppleService.list", "non_ip/apple_services.conf", "AppleService.list", (
+        "apple.com", "apple.co", "appsto.re", "appstore.com", "apple.news",
+        "icloud.com", "itunes.com", "aaplimg.com", "apple-dns.net",
+        "cdn-apple.com", "apple-mapkit.com", "apple-cloudkit.com",
+        "icloud-content.com", "organicfruitapps.com", "me.com",
+    ), "DOMAIN-SUFFIX,apple.com", 8),
+    Source("TikTok.list", "non_ip/stream.conf", "TikTok.list", (
+        "tiktok.com", "tiktok.us", "tiktokv.com", "tiktokv.us", "tiktokw.com",
+        "tiktokcdn.com", "musical.ly", "muscdn.com", "byteoversea.com",
+        "ibytedtos.com", "ipstatp.com", "isnssdk.com", "tik-tokapi.com",
+    ), "DOMAIN-SUFFIX,tiktok.com", 6),
+    Source("InternationalMedia.list", "non_ip/stream.conf", "InternationalMedia.list", (
+        "youtube.com", "youtube-nocookie.com", "googlevideo.com", "ytimg.com",
+        "netflix.com", "netflix.net", "nflxvideo.net", "nflximg.net",
+        "nflxso.net", "nflxext.com", "nflxsearch.net", "disneyplus.com",
+        "disney-plus.net", "dssott.com", "bamgrid.com", "hulu.com",
+        "spotify.com", "spotifycdn.com", "scdn.co", "twitch.tv",
+        "ttvnw.net", "jtvnw.net", "primevideo.com", "primevideo.tv",
+        "amazonvideo.com", "hbomax.com", "max.com", "hbo.com",
+        "peacocktv.com", "paramountplus.com", "discoveryplus.com",
+        "crunchyroll.com", "soundcloud.com", "twitchcdn.net",
+    ), "DOMAIN-SUFFIX,netflix.com", 12),
+    Source("TelegramDomain.list", "non_ip/telegram.conf", "Telegram.list", (
+        "t.me", "tx.me", "tg.dev", "legra.ph", "graph.org", "telega.one",
+        "telegra.ph", "telesco.pe", "telegram.me", "tdesktop.com",
+        "telegram.dog", "telegram.org", "telegram.space", "cdn-telegram.org",
+    ), "DOMAIN-SUFFIX,telegram.org", 8),
+    Source("TelegramIP.list", "ip/telegram.conf", "Telegram.list", (),
+           "IP-CIDR,149.154.160.0/20,no-resolve", 7, True),
+)
+
+
+def download(url: str) -> str:
+    if not url.startswith(SOURCE_BASE):
+        raise ValueError("untrusted rule host")
+    request = urllib.request.Request(url, headers={"User-Agent": "aggregator-rules/1.0"})
+    with urllib.request.urlopen(request, timeout=25) as response:
+        size = response.headers.get("Content-Length", "")
+        if size.isdigit() and int(size) > MAX_BYTES:
+            raise ValueError("rule source too large")
+        data = response.read(MAX_BYTES + 1)
+    if len(data) > MAX_BYTES:
+        raise ValueError("rule source too large")
+    return data.decode("utf-8-sig")
+
+
+def extract(spec: Source, source: str) -> list[str]:
+    result, seen = [], set()
+    for line in source.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        columns = line.split(",")
+        kind = columns[0].upper()
+        normalized = None
+        if spec.ip:
+            if kind not in {"IP-CIDR", "IP-CIDR6"} or len(columns) < 2:
+                continue
+            try:
+                network = ipaddress.ip_network(columns[1].strip(), strict=True)
+            except ValueError:
+                continue
+            if kind == "IP-CIDR" and network.version != 4:
+                continue
+            if kind == "IP-CIDR6" and network.version != 6:
+                continue
+            if network.prefixlen < (8 if network.version == 4 else 24):
+                continue
+            normalized = f"{kind},{network},no-resolve"
+        else:
+            if kind not in {"DOMAIN", "DOMAIN-SUFFIX"} or len(columns) < 2:
+                continue
+            domain = columns[1].strip().lower().strip(".")
+            if len(domain) > 253 or ".." in domain or not DOMAIN_RE.fullmatch(domain):
+                continue
+            if "7h15.ru1353t" in domain:  # upstream tracking sentinel
+                continue
+            if not any(domain == root or domain.endswith("." + root) for root in spec.allow):
+                continue
+            normalized = f"{kind},{domain}"
+        if normalized not in seen:
+            result.append(normalized)
+            seen.add(normalized)
+    if spec.anchor not in seen:
+        raise ValueError(f"missing required anchor: {spec.anchor}")
+    if len(result) < spec.minimum or len(result) > 400:
+        raise ValueError(f"unexpected rule count: {len(result)}")
+    return result
+
+
+def snapshot(spec: Source, source: str, *, base_text: str = "") -> str:
+    rows = extract(spec, source)
+    existing = set()
+    for raw in base_text.splitlines():
+        line = raw.strip().lower()
+        if line.startswith(("DOMAIN,", "DOMAIN-SUFFIX,", "IP-CIDR,", "IP-CIDR6,")):
+            existing.add(line)
+    # Avoid exact duplicates and redundant subdomains already covered by
+    # handwritten suffix rules for the same service.
+    suffixes = [line.split(",", 1)[1] for line in existing
+                if line.startswith("domain-suffix,")]
+    filtered = []
+    for rule in rows:
+        if rule.lower() in existing:
+            continue
+        if not spec.ip:
+            domain = rule.split(",", 1)[1]
+            if any(domain == suffix or domain.endswith("." + suffix) for suffix in suffixes):
+                continue
+        filtered.append(rule)
+    if not filtered:
+        raise ValueError("no nonredundant rules; retain previous snapshot")
+    return ("# AUTO-GENERATED: trusted, service-filtered upstream supplement.\n"
+            f"# Source: {SOURCE_BASE}{spec.remote_path} (SukkaW/Surge, AGPL-3.0)\n"
+            "# Handwritten ../custom/ rules always take precedence.\n"
+            + "\n".join(filtered) + "\n")
+
+
+def validate_snapshot_file(spec: Source, text: str) -> None:
+    if not text.startswith("# AUTO-GENERATED:"):
+        raise ValueError(f"{spec.filename}: missing origin marker")
+    if f"{SOURCE_BASE}{spec.remote_path}" not in text:
+        raise ValueError(f"{spec.filename}: invalid origin")
+    rows = [x.strip() for x in text.splitlines() if x.strip() and not x.startswith("#")]
+    if not rows or len(rows) != len(set(rows)) or len(rows) > 400:
+        raise ValueError(f"{spec.filename}: empty/duplicated/oversized snapshot")
+    for row in rows:
+        parts = row.split(",")
+        if spec.ip:
+            if parts[0] not in ("IP-CIDR", "IP-CIDR6") or parts[-1] != "no-resolve":
+                raise ValueError(f"{spec.filename}: invalid CIDR rule {row!r}")
+            try:
+                address = ipaddress.ip_network(parts[1], strict=True)
+            except ValueError as e:
+                raise ValueError(f"{spec.filename}: invalid CIDR") from e
+            if len(parts) != 3 or (parts[0] == "IP-CIDR") != (address.version == 4):
+                raise ValueError(f"{spec.filename}: IP family mismatch")
+        else:
+            if parts[0] not in ("DOMAIN", "DOMAIN-SUFFIX") or len(parts) != 2:
+                raise ValueError(f"{spec.filename}: unsupported rule {row!r}")
+            domain = parts[1]
+            if not DOMAIN_RE.fullmatch(domain) or ".." in domain or not any(
+                    domain == root or domain.endswith("." + root) for root in spec.allow):
+                raise ValueError(f"{spec.filename}: out-of-category rule {row!r}")
+
+
+def update(root: Path = ROOT, downloader=download) -> dict[str, str]:
+    results = {}
+    cache: dict[str, str] = {}
+    for spec in SOURCES:
+        dst = root / "subconverter/rules/auto" / spec.filename
+        base = root / "subconverter/rules/custom" / spec.base_filename
+        try:
+            if spec.remote_path not in cache:
+                cache[spec.remote_path] = downloader(SOURCE_BASE + spec.remote_path)
+            new = snapshot(spec, cache[spec.remote_path], base_text=base.read_text("utf-8"))
+            validate_snapshot_file(spec, new)
+            old = dst.read_text("utf-8")
+            validate_snapshot_file(spec, old)
+            old_lines = sum(bool(x) and not x.startswith("#") for x in old.splitlines())
+            new_lines = sum(bool(x) and not x.startswith("#") for x in new.splitlines())
+            if new_lines * 2 < old_lines:
+                raise ValueError(f"rule count dropped sharply: {old_lines} -> {new_lines}")
+            if old == new:
+                results[spec.filename] = "unchanged"
+            else:
+                dst.write_text(new, encoding="utf-8")
+                results[spec.filename] = f"updated: {old_lines} -> {new_lines}"
+        except (OSError, UnicodeError, ValueError) as exc:
+            # Never replace the last committed good snapshot on source failure.
+            results[spec.filename] = f"retained previous: {type(exc).__name__}: {exc}"
+    return results
+
+
+def check(root: Path = ROOT) -> None:
+    for spec in SOURCES:
+        path = root / "subconverter/rules/auto" / spec.filename
+        validate_snapshot_file(spec, path.read_text("utf-8"))
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--update", action="store_true", help="fetch, validate, persist only valid snapshots")
+    args = parser.parse_args()
+    if args.update:
+        for name, status in update().items():
+            print(f"{name}: {status}")
+    else:
+        check()
+        print("自动规则快照检查通过")
