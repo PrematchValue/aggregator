@@ -79,12 +79,40 @@ class TargetedRoutingTests(unittest.TestCase):
         self.assertEqual(tags["全球加速"]["outbounds"], ["香港节点", "狮城节点", "特殊节点"])
         self.assertEqual(tags["香港节点"]["type"], "urltest")
         self.assertEqual(tags["特殊节点"]["type"], "selector")
-        self.assertEqual(tags["冷钱包"]["outbounds"][-1], "国内直连")
+        self.assertEqual(tags["冷钱包"]["outbounds"][-1], "DIRECT")
+        self.assertNotIn("国内直连", tags)
+        self.assertNotIn("REJECT", tags)
         self.assertNotIn("GLOBAL", tags)
         self.assertNotIn("dns-out", tags)
         self.assertEqual(result["route"]["rules"][0]["action"], "hijack-dns")
         self.assertEqual(result["route"]["final"], "漏网之鱼")
         self.assertEqual(tags["🇸🇬 新加坡 001"]["server"], "sg.example")
+
+    def test_singbox_missing_native_direct_and_legacy_reject_are_normalized(self):
+        config = {
+            "dns": {"servers": [{"tag": "dns_proxy", "type": "https"}]},
+            "outbounds": [{"tag": "🇯🇵 日本 001", "type": "trojan"}],
+            "route": {"rules": [{"domain_suffix": "ads.example", "outbound": "REJECT"},
+                                {"domain_suffix": "cn", "outbound": "DIRECT"}]}
+        }
+        result = json.loads(apply_singbox_layout(json.dumps(config)))
+        tags = {o["tag"]: o for o in result["outbounds"]}
+        self.assertEqual(tags["DIRECT"]["type"], "direct")
+        self.assertNotIn("国内直连", tags)
+        self.assertNotIn("REJECT", tags)
+        self.assertEqual(result["route"]["rules"][0]["action"], "reject")
+        self.assertNotIn("outbound", result["route"]["rules"][0])
+        self.assertEqual(result["route"]["rules"][1]["outbound"], "DIRECT")
+
+    def test_singbox_reject_final_keeps_a_valid_fallback(self):
+        config = {
+            "dns": {"servers": [{"tag": "dns_proxy", "type": "https"}]},
+            "outbounds": [{"tag": "🇯🇵 日本 001", "type": "trojan"}],
+            "route": {"rules": [], "final": "REJECT"}
+        }
+        result = json.loads(apply_singbox_layout(json.dumps(config)))
+        self.assertEqual(result["route"]["final"], "DIRECT")
+        self.assertEqual(result["route"]["rules"][-1], {"action": "reject"})
 
     def test_singbox_uses_correct_template_and_conversion_hook(self):
         template = (ROOT / "subconverter/base/all_base.tpl").read_text(encoding="utf-8")

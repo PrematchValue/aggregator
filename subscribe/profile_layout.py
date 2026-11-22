@@ -26,8 +26,8 @@ ICONS = {
     "漏网之鱼": "Final.png",
     "香港节点": "Hong_Kong.png",
     "台湾节点": "Taiwan.png",
-    "狮城节点": "Singapore.png",
     "日本节点": "Japan.png",
+    "狮城节点": "Singapore.png",
     "美国节点": "United_States.png",
     "特殊节点": "Available.png",
 }
@@ -38,8 +38,8 @@ SERVICES = (
 REGIONS = (
     ("香港节点", "🇭🇰 香港 "),
     ("台湾节点", "🇹🇼 台湾 "),
-    ("狮城节点", "🇸🇬 新加坡 "),
     ("日本节点", "🇯🇵 日本 "),
+    ("狮城节点", "🇸🇬 新加坡 "),
     ("美国节点", "🇺🇸 美国 "),
 )
 SPECIAL = "特殊节点"

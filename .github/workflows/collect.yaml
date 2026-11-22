@@ -52,6 +52,18 @@ jobs:
           fi
           # Preserve customized DNS, client and routing templates during safe merges.
           git restore --source="$BASE" --staged --worktree -- subconverter/base/all_base.tpl subconverter/pref.toml subconverter/snippets/rulesets.toml
+          # Preserve local runtime contracts, regions, rules and checks against
+          # upstream edits. Conflicts elsewhere abort the merge without pushing.
+          git restore --source="$BASE" --staged --worktree -- \
+            subscribe/collect.py subscribe/profile_layout.py subscribe/singbox_layout.py \
+            subscribe/geo_labels.py subscribe/verified_nodes.py subscribe/surge_provider.py \
+            subscribe/refresh_due.py subscribe/refresh_guard.py subscribe/push.py \
+            subconverter/rules/custom tests/test_profile_layout.py \
+            tests/test_targeted_routing.py tests/test_clash_oneclick.py \
+            tests/test_profile_defaults.py tests/test_surge_provider.py \
+            tests/test_refresh_guard.py tests/test_gist_retry.py \
+            tests/test_verified_nodes.py tests/test_output_publish.py
+          git restore --source="$BASE" --staged --worktree -- subscribe/output_publish.py
           # A merge touching only protected files has no useful local changes.
           if git diff --cached --quiet; then
             git merge --abort || true
@@ -68,6 +80,9 @@ jobs:
             echo "上游合并版本测试未通过，保留稳定代码" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          echo "上游安全变更文件：" >> "$GITHUB_STEP_SUMMARY"
+          git diff --cached --name-only | sed 's/^/- /' >> "$GITHUB_STEP_SUMMARY"
+          echo "自定义文件已恢复为本地版本；遇到合并冲突或测试失败时不会推送" >> "$GITHUB_STEP_SUMMARY"
           git commit -m "Merge upstream after regression tests"
           git fetch origin main
           if [ "$(git rev-parse origin/main)" != "$BASE" ]; then

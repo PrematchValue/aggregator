@@ -87,7 +87,7 @@ class VerifiedHistoryTests(unittest.TestCase):
         self.assertLess(source.index('merge_candidates(proxies, previous)'),
                         source.index('clash.generate_config(workspace'))
         self.assertIn('snapshot_content(nodes)', source)
-        self.assertIn('files["verified-nodes.json"]', source)
+        self.assertIn('shared["verified-nodes.json"]', source)
         self.assertIn('push_client.push_to(', source)
 
 

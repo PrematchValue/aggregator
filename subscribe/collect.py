@@ -353,47 +353,40 @@ def aggregate(args: argparse.Namespace) -> None:
         list_only = False if target == "v2ray" or target == "mixed" or "ss" in target else not args.all
         targets.append((convert_name, filename, target, list_only, args.ignore_default_filters))
 
+    # Conversion and validation are independent for each target. A broken
+    # sing-box output must never prevent a valid Clash/Surge/V2Ray publication.
+    failed_targets = {}
     for t in targets:
-        success = subconverter.generate_conf(generate_conf, t[0], source, t[1], t[2], None if getattr(args, 'geo_rename', False) else True, t[3], t[4])
-        if not success:
-            logger.error(f"cannot generate subconverter config file for target: {t[2]}")
-            continue
-
-        if subconverter.convert(binname=subconverter_bin, artifact=t[0]):
-            filepath = os.path.join(DATA_BASE, t[1])
+        target_name = t[2]
+        filepath = os.path.join(DATA_BASE, t[1])
+        try:
+            success = subconverter.generate_conf(
+                generate_conf, t[0], source, t[1], t[2],
+                None if getattr(args, 'geo_rename', False) else True, t[3], t[4]
+            )
+            if not success:
+                raise ValueError("无法生成 SubConverter 参数")
+            if not subconverter.convert(binname=subconverter_bin, artifact=t[0]):
+                raise ValueError("SubConverter 转换失败")
             shutil.move(os.path.join(PATH, "subconverter", t[1]), filepath)
 
-            # Deterministic icon-bearing service/region groups for complete profiles.
-            # Leave SubConverter's node protocols, DNS and routing conversion untouched.
-            if t[2] in ("clash", "surge"):
+            if target_name in ("clash", "surge"):
                 from profile_layout import apply_profile_layout
-                try:
-                    with open(filepath, encoding="utf-8") as rendered:
-                        profile = rendered.read()
-                    updated = apply_profile_layout(profile, t[2])
-                    with open(filepath, "w", encoding="utf-8") as rendered:
-                        rendered.write(updated)
-                except (OSError, ValueError, yaml.YAMLError) as exc:
-                    logger.error("策略组生成失败，停止发布以保留旧订阅：" + str(exc))
-                    sys.exit(1)
+                with open(filepath, encoding="utf-8") as rendered:
+                    profile = rendered.read()
+                updated = apply_profile_layout(profile, target_name)
+                with open(filepath, "w", encoding="utf-8") as rendered:
+                    rendered.write(updated)
 
-            # Resolve Sing-box proxy DNS and local service/region policy tags.
-            # Keep source proxy protocols and the upstream converted rules intact.
-            if t[2] == "singbox":
+            if target_name == "singbox":
                 from singbox_layout import apply_singbox_layout
-                try:
-                    with open(filepath, encoding="utf-8") as source_file:
-                        profile = source_file.read()
-                    updated = apply_singbox_layout(profile)
-                    with open(filepath, "w", encoding="utf-8") as output_file:
-                        output_file.write(updated)
-                except (OSError, ValueError) as exc:
-                    logger.error("Sing-box 出站或 DNS 分流校验失败，停止发布：" + str(exc))
-                    sys.exit(1)
+                with open(filepath, encoding="utf-8") as source_file:
+                    profile = source_file.read()
+                updated = apply_singbox_layout(profile)
+                with open(filepath, "w", encoding="utf-8") as output_file:
+                    output_file.write(updated)
 
-            # Fix only the managed URL after upstream's normal Surge conversion.
-            # Do not alter Surge's update interval, DNS, rules, nodes or formats.
-            if t[2] == "surge" and username and gist_id:
+            if target_name == "surge" and username and gist_id:
                 from surge_provider import fix_managed_gist_url
                 with open(filepath, encoding="utf-8") as source_file:
                     profile = source_file.read()
@@ -402,6 +395,12 @@ def aggregate(args: argparse.Namespace) -> None:
                     output_file.write(profile)
 
             records[t[1]] = filepath
+            logger.info(f"{target_name} 转换与校验成功")
+        except Exception as exc:
+            failed_targets[target_name] = f"{type(exc).__name__}: {exc}"
+            records.pop(t[1], None)
+            logger.error(f"{target_name} 处理失败，保留该平台旧订阅：{failed_targets[target_name]}")
+            continue
 
     # Minimal output extension: preserve a pure proxy policy-path alongside
     # upstream's normal Surge profile. No independent conversion engine.
@@ -418,6 +417,7 @@ def aggregate(args: argparse.Namespace) -> None:
         except (OSError, ValueError):
             # Keep the last two published Surge artifacts unchanged together.
             records.pop('surge.conf', None)
+            failed_targets['surge'] = 'Surge 外部节点列表生成失败'
             logger.warning('Surge 外部代理节点列表生成失败；本轮跳过 Surge 两份文件')
 
     if len(records) > 0:
@@ -458,32 +458,58 @@ def aggregate(args: argparse.Namespace) -> None:
     # 保存实际可使用的网站列表
     utils.write_file(filename=os.path.join(DATA_BASE, "valid-domains.txt"), lines=list(set(domains)))
 
-    # 如有必要，上传至 Gist
+    # Only independently validated targets are eligible for Gist updates.
+    # One PATCH per platform; Surge complete profile and pure proxy list are
+    # published together. Files absent from the PATCH retain their old version.
+    from output_publish import publication_groups
+    groups = publication_groups(targets, records)
+    published_targets = []
     if gist_id and access_token:
-        files, item = {}, StorageItem(gist_id=gist_id, filename=list(records.keys())[0])
-
-        for k, v in records.items():
-            if os.path.exists(v) and os.path.isfile(v):
-                with open(v, "r", encoding="utf8") as f:
-                    lines = utils.trim(f.read())
-                    if lines:
-                        files[k] = {"content": lines, "filename": k}
-
+        push_client = push.PushToGist(token=access_token)
+        shared = {}
         if urls:
-            files[subscribes_file] = {"content": "\n".join(urls), "filename": subscribes_file}
+            shared[subscribes_file] = {"content": "\n".join(urls), "filename": subscribes_file}
+        if history_content:
+            shared["verified-nodes.json"] = {"content": history_content, "filename": "verified-nodes.json"}
+        for target_name, filenames in groups:
+            try:
+                files = {}
+                for filename in filenames:
+                    with open(records[filename], "r", encoding="utf-8") as handle:
+                        content = utils.trim(handle.read())
+                    if not content:
+                        raise ValueError(f"空的输出文件：{filename}")
+                    files[filename] = {"content": content, "filename": filename}
+                # Publish shared node history once, with the first successful
+                # target. If that PATCH fails, retry with the next target.
+                files.update(shared)
+                item = StorageItem(gist_id=gist_id, filename=filenames[0])
+                success = push_client.push_to(
+                    content="", item=item, payload={"files": files}, group=target_name
+                )
+                if not success:
+                    raise ValueError("Gist PATCH 失败")
+                shared = {}
+                published_targets.append(target_name)
+                logger.info(f"{target_name} Gist 发布成功")
+            except Exception as exc:
+                failed_targets[target_name] = f"{type(exc).__name__}: {exc}"
+                logger.error(f"{target_name} 发布失败，该平台保留旧版：{failed_targets[target_name]}")
+        if not published_targets:
+            logger.error("全部平台发布失败，旧订阅未被本轮成功更新")
+            sys.exit(1)
+    else:
+        published_targets = [name for name, _ in groups]
 
-        if files:
-            if history_content:
-                files["verified-nodes.json"] = {"content": history_content, "filename": "verified-nodes.json"}
-            push_client = push.PushToGist(token=access_token)
-
-            # 上传
-            success = push_client.push_to(content="", item=item, payload={"files": files}, group="collect")
-            if success:
-                logger.info(f"upload proxies and subscriptions to gist successed")
-            else:
-                logger.error("Gist 发布失败，旧节点快照保持不变")
-                sys.exit(1)
+    state = "部分成功" if failed_targets else "全部成功"
+    logger.info(f"本轮平台更新：{state}；成功={','.join(published_targets) or '无'}；"
+                f"失败={','.join(failed_targets) or '无'}")
+    summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary_file:
+        with open(summary_file, "a", encoding="utf-8") as summary:
+            summary.write(f"\n### Refresh 平台转换与发布：{state}\n")
+            summary.write(f"- 成功平台：{', '.join(published_targets) or '无'}\n")
+            summary.write(f"- 失败平台（旧版保留）：{', '.join(failed_targets) or '无'}\n")
 
     # 清理工作空间
     workflow.cleanup(workspace, [])

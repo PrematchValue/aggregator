@@ -49,14 +49,30 @@ def apply_singbox_layout(text: str) -> str:
     for rule in route.get("rules", []):
         if not isinstance(rule, dict):
             raise ValueError("invalid sing-box route rule")
-        if rule.get("outbound") in legacy_dns:
+        outbound = rule.get("outbound")
+        if outbound in legacy_dns:
             del rule["outbound"]
             rule["action"] = "hijack-dns"
-    doc["outbounds"] = [o for o in outbounds if o.get("type") != "dns"]
+        elif outbound == "REJECT":
+            # sing-box 1.13+ does not have a block outbound: use native action.
+            del rule["outbound"]
+            rule["action"] = "reject"
 
-    extra = [{"type": "direct", "tag": "国内直连"},
-             {"type": "selector", "tag": "全球加速", "outbounds": enabled}]
-    choices = [*enabled, "国内直连"]
+    # Keep the upstream native DIRECT (not a Chinese alias). The generator may
+    # omit builtin policies while still emitting routing rules referencing them.
+    native_direct = [o for o in outbounds if o.get("tag") == "DIRECT"]
+    if native_direct and native_direct[0].get("type") != "direct":
+        raise ValueError("sing-box DIRECT tag is not a native direct outbound")
+    native_reject = [o for o in outbounds if o.get("tag") == "REJECT"]
+    if native_reject and native_reject[0].get("type") != "block":
+        raise ValueError("unexpected sing-box REJECT outbound type")
+    doc["outbounds"] = [o for o in outbounds
+                        if o.get("type") != "dns" and o.get("tag") != "REJECT"]
+    if not native_direct:
+        doc["outbounds"].insert(0, {"type": "direct", "tag": "DIRECT"})
+
+    extra = [{"type": "selector", "tag": "全球加速", "outbounds": enabled}]
+    choices = [*enabled, "DIRECT"]
     extra.extend({"type": "selector", "tag": name, "outbounds": choices}
                  for name in SERVICES)
     for name in enabled:
@@ -66,7 +82,12 @@ def apply_singbox_layout(text: str) -> str:
                          interval="10m", tolerance=50)
         extra.append(group)
     doc["outbounds"].extend(extra)
-    if not route.get("final"):
+    if route.get("final") == "REJECT":
+        # A default route requires an outbound tag. Preserve reject-all intent
+        # with a terminal action rule instead of pointing at a removed outbound.
+        route["rules"].append({"action": "reject"})
+        route["final"] = "DIRECT"
+    elif not route.get("final"):
         route["final"] = "漏网之鱼"
 
     # Fail closed: all converted routing tags must exist after group generation.
