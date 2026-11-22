@@ -38,9 +38,8 @@ class ProfileAndScheduleTests(unittest.TestCase):
         self.assertEqual(config['inbounds'][0]['listen'], '127.0.0.1')
 
     def test_singbox_dns_detour_group_exists(self):
-        groups = tomllib.loads((ROOT/'subconverter/snippets/groups.toml').read_text(encoding='utf-8'))
-        names = [g['name'] for g in groups['custom_groups']]
-        self.assertIn('🔰 节点选择', names)
+        template = TEMPLATE.read_text(encoding='utf-8')
+        self.assertEqual(template.count('#全球加速'), 2)
         pref = tomllib.loads((ROOT/'subconverter/pref.toml').read_text(encoding='utf-8'))
         keyed = {g['key']:g['value'] for g in pref['template']['globals']}
         self.assertEqual(keyed['singbox.allow_lan'], 'false')
@@ -50,9 +49,7 @@ class ProfileAndScheduleTests(unittest.TestCase):
         self.assertIn('cron: "17 */4 * * *"', yml)
         self.assertNotIn('cron: "47 */4 * * *"', yml)
         self.assertIn('backup_slot:', yml)
-        standby = (ROOT / ".github/workflows/refresh-backup.yaml").read_text(encoding="utf-8")
-        self.assertIn('cron: "47 1-23/4 * * *"', standby)
-        self.assertIn("actions: write", standby)
+        self.assertFalse((ROOT / ".github/workflows/refresh-backup.yaml").exists())
         self.assertIn(' --geo-rename ', yml)
         self.assertNotIn('--max-candidates', yml)
         self.assertNotIn('--stage-output', yml)

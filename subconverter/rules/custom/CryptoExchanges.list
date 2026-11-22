@@ -1,0 +1,21 @@
+# Centralized exchange endpoints; do not mix with wallet/RPC paths
+DOMAIN-SUFFIX,binance.com
+DOMAIN-SUFFIX,binance.us
+DOMAIN-SUFFIX,binance.org
+DOMAIN-SUFFIX,okx.com
+DOMAIN-SUFFIX,okex.com
+DOMAIN-SUFFIX,bybit.com
+DOMAIN-SUFFIX,bitget.com
+DOMAIN-SUFFIX,gate.io
+DOMAIN-SUFFIX,gate.com
+DOMAIN-SUFFIX,coinbase.com
+DOMAIN-SUFFIX,coinbasepro.com
+DOMAIN-SUFFIX,kraken.com
+DOMAIN-SUFFIX,bitfinex.com
+DOMAIN-SUFFIX,kucoin.com
+DOMAIN-SUFFIX,htx.com
+DOMAIN-SUFFIX,huobi.com
+DOMAIN-SUFFIX,crypto.com
+DOMAIN-SUFFIX,coinex.com
+DOMAIN-SUFFIX,bitstamp.net
+DOMAIN-SUFFIX,gemini.com

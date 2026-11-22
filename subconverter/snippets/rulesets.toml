@@ -1,80 +1,63 @@
+# Local, ordered rule registry for both Surge and Clash outputs.
+# Specific services before broad Google/Apple and China rules.
+# All group names are ASCII/Chinese without decorative emoji.
+
 [[rulesets]]
-group = "🎯 全球直连"
+group = "DIRECT"
 ruleset = "rules/LocalAreaNetwork.list"
 
 [[rulesets]]
-group = "Ⓜ️ 微软服务"
-ruleset = "rules/MSServices.list"
+group = "苹果推送"
+ruleset = "rules/custom/ApplePush.list"
 
 [[rulesets]]
-group = "🎯 全球直连"
-ruleset = "rules/DivineEngine/Surge/Ruleset/Unbreak.list"
+group = "AI服务"
+ruleset = "rules/custom/AI.list"
 
 [[rulesets]]
-group = "🛑 全球拦截"
-ruleset = "rules/NobyDa/Surge/AdRule.list"
+group = "冷钱包"
+ruleset = "rules/custom/ColdWallet.list"
 
 [[rulesets]]
-group = "🛑 全球拦截"
-ruleset = "rules/DivineEngine/Surge/Ruleset/Guard/Hijacking.list"
+group = "数字资产"
+ruleset = "rules/custom/CryptoExchanges.list"
 
 [[rulesets]]
-group = "🎥 NETFLIX"
-ruleset = "rules/DivineEngine/Surge/Ruleset/StreamingMedia/Video/Netflix.list"
+group = "TikTok"
+ruleset = "rules/custom/TikTok.list"
 
 [[rulesets]]
-group = "🌍 国外媒体"
-ruleset = "rules/DivineEngine/Surge/Ruleset/StreamingMedia/Streaming.list"
+group = "港台番剧"
+ruleset = "rules/custom/BilibiliRegion.list"
 
 [[rulesets]]
-group = "🌏 国内媒体"
-ruleset = "rules/lhie1/Surge/Surge 3/Provider/Media/Bilibili.list"
+group = "国际媒体"
+ruleset = "rules/custom/InternationalMedia.list"
 
 [[rulesets]]
-group = "🌏 国内媒体"
-ruleset = "rules/lhie1/Surge/Surge 3/Provider/Media/iQiyi.list"
+group = "Telegram"
+ruleset = "rules/custom/Telegram.list"
 
 [[rulesets]]
-group = "🌏 国内媒体"
-ruleset = "rules/lhie1/Surge/Surge 3/Provider/Media/Letv.list"
+group = "Google服务"
+ruleset = "rules/custom/Google.list"
 
 [[rulesets]]
-group = "🌏 国内媒体"
-ruleset = "rules/lhie1/Surge/Surge 3/Provider/Media/MOO.list"
+group = "苹果服务"
+ruleset = "rules/custom/AppleService.list"
 
 [[rulesets]]
-group = "🌏 国内媒体"
-ruleset = "rules/lhie1/Surge/Surge 3/Provider/Media/Tencent Video.list"
+group = "REJECT"
+ruleset = "rules/custom/BlockAds.list"
 
 [[rulesets]]
-group = "🌏 国内媒体"
-ruleset = "rules/lhie1/Surge/Surge 3/Provider/Media/Youku.list"
+group = "DIRECT"
+ruleset = "rules/custom/ChinaDirect.list"
 
 [[rulesets]]
-group = "📲 电报信息"
-ruleset = "rules/DivineEngine/Surge/Ruleset/Extra/Telegram/Telegram.list"
-
-[[rulesets]]
-group = "🔰 节点选择"
-ruleset = "rules/DivineEngine/Surge/Ruleset/Global.list"
-
-[[rulesets]]
-group = "🍎 苹果服务"
-ruleset = "rules/DivineEngine/Surge/Ruleset/Extra/Apple/Apple.list"
-
-[[rulesets]]
-group = "🎯 全球直连"
-ruleset = "rules/DivineEngine/Surge/Ruleset/China.list"
-
-[[rulesets]]
-group = "🎯 全球直连"
-ruleset = "rules/NobyDa/Surge/Download.list"
-
-[[rulesets]]
-group = "🎯 全球直连"
+group = "DIRECT"
 ruleset = "[]GEOIP,CN"
 
 [[rulesets]]
-group = "🐟 漏网之鱼"
+group = "漏网之鱼"
 ruleset = "[]FINAL"
-

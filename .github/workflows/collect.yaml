@@ -51,7 +51,7 @@ jobs:
             exit 0
           fi
           # Preserve customized DNS, client and routing templates during safe merges.
-          git restore --source="$BASE" --staged --worktree -- subconverter/base/all_base.tpl subconverter/pref.toml subconverter/snippets/groups.toml subconverter/snippets/rulesets.toml
+          git restore --source="$BASE" --staged --worktree -- subconverter/base/all_base.tpl subconverter/pref.toml subconverter/snippets/rulesets.toml
           # A merge touching only protected files has no useful local changes.
           if git diff --cached --quiet; then
             git merge --abort || true

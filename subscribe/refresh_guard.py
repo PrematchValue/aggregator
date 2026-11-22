@@ -1,15 +1,13 @@
-#!/usr/bin/env python3
-"""Rolling missing-Refresh watchdog, resilient to delayed GitHub cron runs.
+"""One shared recheck for externally dispatched Refresh recovery.
 
-The independent backup cron is a *check*, never an unconditional full run.
-A recent successful `process` job or any active Refresh prevents a backup.
-Unlike the former fixed-window check, a late watchdog still checks for gaps.
+Cloudflare may dispatch refresh.yaml with backup_slot; the scheduled GitHub
+backup workflow is removed. No second cron or dispatch engine lives here.
+The actual `process` job, not a green schedule_guard, proves success.
 """
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import json
-import os
 import urllib.request
 
 UTC = timezone.utc
@@ -30,7 +28,7 @@ def github_get(repo: str, token: str, endpoint: str) -> dict:
         "Accept": "application/vnd.github+json",
         "Authorization": f"Bearer {token}",
         "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "aggregator-refresh-watchdog",
+        "User-Agent": "aggregator-refresh-guard",
     })
     with urllib.request.urlopen(request, timeout=20) as resp:
         result = json.load(resp)
@@ -39,21 +37,13 @@ def github_get(repo: str, token: str, endpoint: str) -> dict:
     return result
 
 
-def github_runs(repo: str, token: str) -> list[dict]:
-    data = github_get(repo, token, "/actions/workflows/refresh.yaml/runs?branch=main&per_page=100")
-    runs = data.get("workflow_runs")
-    if not isinstance(runs, list):
-        raise ValueError("invalid GitHub runs data")
-    return runs
-
-
 def process_conclusion(repo: str, token: str, run_id: int) -> str:
-    """Do not confuse a green schedule_guard-only workflow with collection."""
     data = github_get(repo, token, f"/actions/runs/{run_id}/jobs?per_page=100")
     jobs = data.get("jobs")
     if not isinstance(jobs, list) or not jobs:
         raise ValueError("missing GitHub job results")
-    matches = [j for j in jobs if isinstance(j, dict) and j.get("name", "").split(" / ")[-1] == "process"]
+    matches = [j for j in jobs if isinstance(j, dict)
+               and j.get("name", "").split(" / ")[-1] == "process"]
     if not matches:
         raise ValueError("missing process job")
     return str(matches[-1].get("conclusion") or "unknown")
@@ -61,11 +51,7 @@ def process_conclusion(repo: str, token: str, run_id: int) -> str:
 
 def should_dispatch_backup(runs: list[dict], now: datetime, job_result,
                            current_id: int | None = None) -> tuple[bool, str]:
-    """Rolling check: no live process in four hours, or latest process failed.
-
-    Calls `job_result(run_id)` to verify the actual process job. Missing job
-    data is uncertainty and must stop the backup rather than guess.
-    """
+    """Fail closed on unclear status; reject duplicates and active refreshes."""
     if not isinstance(runs, list) or now.tzinfo is None:
         return False, "运行记录或时间无效"
     now = now.astimezone(UTC)
@@ -89,7 +75,7 @@ def should_dispatch_backup(runs: list[dict], now: datetime, job_result,
             return False, f"Refresh {r.get('id')} 状态尚未结束"
         if r.get("status") != "completed":
             return False, f"Refresh {r.get('id')} 状态不明确"
-        state = job_result(r.get("id"))  # May throw: fail closed.
+        state = job_result(r.get("id"))
         if state == "skipped":
             continue
         if state == "success":
@@ -98,40 +84,3 @@ def should_dispatch_backup(runs: list[dict], now: datetime, job_result,
             return True, f"Refresh {r.get('id')} 采集失败，需要补跑"
         return False, f"Refresh {r.get('id')} 采集状态无法确认"
     return True, "最近四小时没有成功执行的采集，允许补跑"
-
-
-def dispatch(repo: str, token: str, moment: datetime) -> None:
-    endpoint = f"https://api.github.com/repos/{repo}/actions/workflows/refresh.yaml/dispatches"
-    payload = json.dumps({"ref": "main", "inputs": {
-        # Only an internal backup marker; the dispatched job uses rolling state.
-        "backup_slot": moment.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
-    }}).encode("utf-8")
-    request = urllib.request.Request(endpoint, data=payload, method="POST", headers={
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "Content-Type": "application/json",
-        "User-Agent": "aggregator-refresh-watchdog",
-    })
-    with urllib.request.urlopen(request, timeout=20) as resp:
-        if resp.status not in (200, 201, 204):
-            raise RuntimeError("Backup dispatch not accepted")
-
-
-def main() -> None:
-    repo = os.environ["GITHUB_REPOSITORY"]
-    token = os.environ["GH_TOKEN"]
-    now = datetime.now(UTC)
-    runs = github_runs(repo, token)
-    due, why = should_dispatch_backup(
-        runs, now, lambda run_id: process_conclusion(repo, token, run_id)
-    )
-    if not due:
-        print(f"备用检查：跳过；{why}")
-        return
-    dispatch(repo, token, now)
-    print(f"备用检查：已请求一次补跑；{why}")
-
-
-if __name__ == "__main__":
-    main()

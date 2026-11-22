@@ -1,0 +1,6 @@
+# Apple Push Notification service (APNs). Keep before AppleService.
+# Never route the entire Apple 17.0.0.0/8 network to this group.
+DOMAIN-SUFFIX,push.apple.com
+DOMAIN-SUFFIX,aps.apple.com
+DOMAIN,courier.push.apple.com
+DOMAIN,api.push.apple.com

@@ -1,0 +1,22 @@
+# AI services first; do not let broad Google/Microsoft routing swallow them
+DOMAIN-SUFFIX,chatgpt.com
+DOMAIN-SUFFIX,openai.com
+DOMAIN-SUFFIX,oaistatic.com
+DOMAIN-SUFFIX,oaiusercontent.com
+DOMAIN-SUFFIX,auth0.openai.com
+DOMAIN,gemini.google.com
+DOMAIN,aistudio.google.com
+DOMAIN,bard.google.com
+DOMAIN,generativelanguage.googleapis.com
+DOMAIN-SUFFIX,anthropic.com
+DOMAIN-SUFFIX,claude.ai
+DOMAIN-SUFFIX,claude.com
+DOMAIN-SUFFIX,perplexity.ai
+DOMAIN-SUFFIX,grok.com
+DOMAIN-SUFFIX,x.ai
+DOMAIN,copilot.microsoft.com
+DOMAIN-SUFFIX,copilot.cloud.microsoft
+DOMAIN-SUFFIX,poe.com
+DOMAIN-SUFFIX,character.ai
+DOMAIN-SUFFIX,mistral.ai
+DOMAIN-SUFFIX,deepseek.com

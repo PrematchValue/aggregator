@@ -363,6 +363,20 @@ def aggregate(args: argparse.Namespace) -> None:
             filepath = os.path.join(DATA_BASE, t[1])
             shutil.move(os.path.join(PATH, "subconverter", t[1]), filepath)
 
+            # Deterministic icon-bearing service/region groups for complete profiles.
+            # Leave SubConverter's node protocols, DNS and routing conversion untouched.
+            if t[2] in ("clash", "surge"):
+                from profile_layout import apply_profile_layout
+                try:
+                    with open(filepath, encoding="utf-8") as rendered:
+                        profile = rendered.read()
+                    updated = apply_profile_layout(profile, t[2])
+                    with open(filepath, "w", encoding="utf-8") as rendered:
+                        rendered.write(updated)
+                except (OSError, ValueError, yaml.YAMLError) as exc:
+                    logger.error("策略组生成失败，停止发布以保留旧订阅：" + str(exc))
+                    sys.exit(1)
+
             # Fix only the managed URL after upstream's normal Surge conversion.
             # Do not alter Surge's update interval, DNS, rules, nodes or formats.
             if t[2] == "surge" and username and gist_id:

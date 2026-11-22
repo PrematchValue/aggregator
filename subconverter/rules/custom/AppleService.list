@@ -1,0 +1,14 @@
+# Apple services not caught by the dedicated APNs group
+DOMAIN-SUFFIX,apple.com
+DOMAIN-SUFFIX,icloud.com
+DOMAIN-SUFFIX,icloud-content.com
+DOMAIN-SUFFIX,apple-cloudkit.com
+DOMAIN-SUFFIX,apple-dns.net
+DOMAIN-SUFFIX,itunes.com
+DOMAIN-SUFFIX,mzstatic.com
+DOMAIN-SUFFIX,aaplimg.com
+DOMAIN-SUFFIX,cdn-apple.com
+DOMAIN-SUFFIX,me.com
+DOMAIN-SUFFIX,applemusic.com
+DOMAIN-SUFFIX,apple.news
+DOMAIN-SUFFIX,appldnld.apple.com

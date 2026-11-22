@@ -46,8 +46,8 @@ dns:
       - https://dns.alidns.com/dns-query
       - https://doh.pub/dns-query
   nameserver:
-    - 'https://1.1.1.1/dns-query#🔰 节点选择'
-    - 'https://8.8.8.8/dns-query#🔰 节点选择'
+    - 'https://1.1.1.1/dns-query#全球加速'
+    - 'https://8.8.8.8/dns-query#全球加速'
 {% if local.clash.new_field_name == "true" %}
 proxies: ~
 proxy-groups: ~

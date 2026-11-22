@@ -12,7 +12,7 @@ import json
 import os
 import urllib.request
 
-from refresh_backup import process_conclusion, should_dispatch_backup
+from refresh_guard import process_conclusion, should_dispatch_backup
 
 RECENT_START_SECONDS = 115 * 60
 RECENT_FINISH_SECONDS = 20 * 60

@@ -1,0 +1,30 @@
+# A small high-confidence mainland/local direct list.
+# IP-based mainland routing follows through GEOIP,CN in rulesets.toml.
+DOMAIN-SUFFIX,cn
+DOMAIN-SUFFIX,local
+DOMAIN-SUFFIX,lan
+DOMAIN-SUFFIX,home.arpa
+DOMAIN-SUFFIX,baidu.com
+DOMAIN-SUFFIX,qq.com
+DOMAIN-SUFFIX,weixin.qq.com
+DOMAIN-SUFFIX,wechat.com
+DOMAIN-SUFFIX,alicdn.com
+DOMAIN-SUFFIX,alipay.com
+DOMAIN-SUFFIX,taobao.com
+DOMAIN-SUFFIX,tmall.com
+DOMAIN-SUFFIX,jd.com
+DOMAIN-SUFFIX,163.com
+DOMAIN-SUFFIX,126.com
+DOMAIN-SUFFIX,netease.com
+DOMAIN-SUFFIX,iqiyi.com
+DOMAIN-SUFFIX,youku.com
+DOMAIN-SUFFIX,bilibili.com
+DOMAIN-SUFFIX,douyin.com
+DOMAIN-SUFFIX,douyincdn.com
+DOMAIN-SUFFIX,ixigua.com
+DOMAIN-SUFFIX,xiaohongshu.com
+DOMAIN-SUFFIX,zhihu.com
+DOMAIN-SUFFIX,mi.com
+DOMAIN-SUFFIX,miui.com
+DOMAIN-SUFFIX,amap.com
+DOMAIN-SUFFIX,autonavi.com

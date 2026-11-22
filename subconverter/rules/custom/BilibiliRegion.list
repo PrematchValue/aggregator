@@ -1,0 +1,8 @@
+# HK/TW Bilibili traffic. The app shares domains across mainland and HK/TW
+# video; HTTPS domain routing cannot distinguish individual episode paths.
+DOMAIN-SUFFIX,bilibili.tv
+DOMAIN-SUFFIX,bstarstatic.com
+DOMAIN,api.bilibili.com
+DOMAIN,api.bilibili.tv
+DOMAIN-SUFFIX,bilivideo.com
+DOMAIN-SUFFIX,hdslb.com

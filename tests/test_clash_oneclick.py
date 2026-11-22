@@ -36,25 +36,29 @@ class ClashOneClickTests(unittest.TestCase):
         self.assertEqual(dns["listen"], "127.0.0.1:1053")
         self.assertIn("geosite:cn,private", dns["nameserver-policy"])
         self.assertEqual(len(dns["proxy-server-nameserver"]), 2)
-        self.assertTrue(all("#🔰 节点选择" in x for x in dns["nameserver"]))
+        self.assertTrue(all("#全球加速" in x for x in dns["nameserver"]))
         self.assertIn("+.lan", dns["fake-ip-filter"])
         self.assertIn("captive.apple.com", dns["fake-ip-filter"])
 
-    def test_selected_dns_proxy_group_exists_and_auto_selects_by_default(self):
-        config = tomllib.loads((ROOT / "subconverter/snippets/groups.toml").read_text(encoding="utf-8"))
-        groups = {group["name"]: group for group in config["custom_groups"]}
-        self.assertIn("🔰 节点选择", groups)
-        self.assertIn("♻️ 自动选择", groups)
-        self.assertEqual(groups["♻️ 自动选择"]["type"], "url-test")
-        self.assertEqual(groups["🔰 节点选择"]["rule"][0], "[]♻️ 自动选择")
+    def test_dns_uses_global_acceleration_and_no_auto_group(self):
+        from sys import path as module_path
+        module_path.insert(0, str(ROOT / 'subscribe'))
+        from profile_layout import groups_for_clash
+        groups = {g['name']: g for g in groups_for_clash(['🇭🇰 香港 001', '🇯🇵 日本 001'])}
+        self.assertEqual(groups['全球加速']['proxies'], ['香港节点', '日本节点'])
+        self.assertNotIn('DIRECT', groups['全球加速']['proxies'])
+        self.assertIn('DIRECT', groups['苹果推送']['proxies'])
+        self.assertNotIn('♻️ 自动选择', groups)
 
-    def test_existing_rule_groups_and_rule_template_preserved(self):
-        rules = tomllib.loads((ROOT / "subconverter/snippets/rulesets.toml").read_text(encoding="utf-8"))
-        groups = tomllib.loads((ROOT / "subconverter/snippets/groups.toml").read_text(encoding="utf-8"))
-        names = {group["name"] for group in groups["custom_groups"]}
-        for rule in rules["rulesets"]:
-            self.assertIn(rule["group"], names)
-        self.assertEqual(rules["rulesets"][-1]["ruleset"], "[]FINAL")
+    def test_local_rules_reference_defined_service_groups(self):
+        from sys import path as module_path
+        module_path.insert(0, str(ROOT / 'subscribe'))
+        from profile_layout import SERVICES
+        rules = tomllib.loads((ROOT / 'subconverter/snippets/rulesets.toml').read_text(encoding='utf-8'))
+        names = set(SERVICES) | {'DIRECT', 'REJECT'}
+        for rule in rules['rulesets']:
+            self.assertIn(rule['group'], names)
+        self.assertEqual(rules['rulesets'][-1]['ruleset'], '[]FINAL')
 
     def test_lan_is_disabled_by_default_without_affecting_other_targets(self):
         template = simplified_clash_template()
