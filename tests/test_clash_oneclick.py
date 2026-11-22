@@ -47,7 +47,7 @@ class ClashOneClickTests(unittest.TestCase):
         groups = {g['name']: g for g in groups_for_clash(['🇭🇰 香港 001', '🇯🇵 日本 001'])}
         self.assertEqual(groups['全球加速']['proxies'], ['香港节点', '日本节点'])
         self.assertNotIn('DIRECT', groups['全球加速']['proxies'])
-        self.assertIn('DIRECT', groups['苹果推送']['proxies'])
+        self.assertIn('国内直连', groups['苹果推送']['proxies'])
         self.assertNotIn('♻️ 自动选择', groups)
 
     def test_local_rules_reference_defined_service_groups(self):
