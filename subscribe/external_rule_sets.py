@@ -13,7 +13,6 @@ import tomllib
 from collections import OrderedDict
 from pathlib import Path
 
-import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = ROOT / "subconverter/snippets/rulesets.toml"
@@ -119,68 +118,18 @@ def sync_exports(root: Path = ROOT, *, check: bool = False) -> int:
     return changed
 
 
-def _rule_lines(items: list[dict[str, str]], target: str) -> list[str]:
+def _surge_rule_lines(items: list[dict[str, str]]) -> list[str]:
     lines = []
     for entry in items:
-        src, group = entry["ruleset"], entry["group"]
-        if src == "[]GEOIP,CN":
-            lines.append(("GEOIP,CN,DIRECT" if target == "clash" else "GEOIP,CN,国内直连"))
-        elif src == "[]FINAL":
-            lines.append(("MATCH,漏网之鱼" if target == "clash" else "FINAL,漏网之鱼"))
+        source, group = entry["ruleset"], entry["group"]
+        if source == "[]GEOIP,CN":
+            lines.append("GEOIP,CN,国内直连")
+        elif source == "[]FINAL":
+            lines.append("FINAL,漏网之鱼")
         else:
-            if target == "clash":
-                lines.append(f"RULE-SET,{tag_for(src)},{group}")
-            else:
-                policy = "国内直连" if group == "DIRECT" else ("广告拦截" if group == "REJECT" else group)
-                # REJECT here is the native Surge keyword; no need for an alias.
-                policy = "REJECT" if group == "REJECT" else policy
-                lines.append(f"RULE-SET,{RAW_BASE}{src},{policy},update-interval={INTERVAL}")
+            policy = "国内直连" if group == "DIRECT" else ("REJECT" if group == "REJECT" else group)
+            lines.append(f"RULE-SET,{RAW_BASE}{source},{policy},update-interval={INTERVAL}")
     return lines
-
-
-def externalize_clash(profile: str, root: Path = ROOT) -> str:
-    items = registry(root)
-    parsed = yaml.safe_load(profile)
-    if not isinstance(parsed, dict):
-        raise ValueError("invalid Clash profile")
-    key = "rules" if "rules" in parsed else "Rule"
-    if key not in parsed or not isinstance(parsed[key], list):
-        raise ValueError("missing Clash rules")
-    if parsed.get("rule-providers"):
-        raise ValueError("unexpected pre-existing Clash rule providers")
-    providers = {}
-    for r in items:
-        src = r["ruleset"]
-        if src.startswith("[]"):
-            continue
-        tag = tag_for(src)
-        providers[tag] = {
-            "type": "http", "behavior": "classical", "format": "text",
-            "path": f"./ruleset/aggregator/{tag}.list",
-            "url": RAW_BASE + src, "interval": INTERVAL,
-            "proxy": "全球加速",
-        }
-    provider_text = yaml.safe_dump({"rule-providers": providers}, allow_unicode=True,
-                                   sort_keys=False, width=1000)
-    rule_text = yaml.safe_dump({key: _rule_lines(items, "clash")}, allow_unicode=True,
-                               sort_keys=False, width=1000)
-    # Replace *only* the root rules section; keep user-visible DNS/nodes intact.
-    lines = profile.splitlines(keepends=True)
-    starts = [i for i, line in enumerate(lines) if re.match(r"^(?:rules|Rule):", line)]
-    if len(starts) != 1:
-        raise ValueError("ambiguous root Clash rules")
-    start = starts[0]
-    end = next((i for i in range(start + 1, len(lines)) if
-                re.match(r"^[A-Za-z][A-Za-z0-9_-]*\s*:", lines[i])), len(lines))
-    result = "".join(lines[:start]) + provider_text + rule_text + "".join(lines[end:])
-    verified = yaml.safe_load(result)
-    if verified[key] != _rule_lines(items, "clash") or len(verified["rule-providers"]) != len(providers):
-        raise ValueError("Clash rule-set rewrite validation failed")
-    for unchanged in ("proxies", "proxy-groups", "dns"):
-        if unchanged in parsed and verified.get(unchanged) != parsed[unchanged]:
-            raise ValueError(f"Clash {unchanged} changed while converting rules")
-    return result
-
 
 def externalize_surge(profile: str, root: Path = ROOT) -> str:
     items = registry(root)
@@ -190,7 +139,7 @@ def externalize_surge(profile: str, root: Path = ROOT) -> str:
     start = match[0].end()
     ending = re.search(r"(?m)^\[[^\]\n]+\][ \t]*$", profile[start:])
     end = start + ending.start() if ending else len(profile)
-    replacement = "\n" + "\n".join(_rule_lines(items, "surge")) + "\n\n"
+    replacement = "\n" + "\n".join(_surge_rule_lines(items)) + "\n\n"
     result = profile[:start] + replacement + profile[end:]
     if "[Proxy]\n" not in result or "[Proxy Group]\n" not in result:
         raise ValueError("Surge ruleset rewrite removed proxy sections")

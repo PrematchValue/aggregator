@@ -375,9 +375,11 @@ def aggregate(args: argparse.Namespace) -> None:
                 with open(filepath, encoding="utf-8") as rendered:
                     profile = rendered.read()
                 updated = apply_profile_layout(profile, target_name)
-                from external_rule_sets import externalize_clash, externalize_surge
-                updated = (externalize_clash(updated) if target_name == 'clash'
-                           else externalize_surge(updated))
+                # Clash Mi: keep the former SubConverter inline routing output.
+                # This avoids 20+ remote rule providers on the first client start.
+                if target_name == 'surge':
+                    from external_rule_sets import externalize_surge
+                    updated = externalize_surge(updated)
                 with open(filepath, "w", encoding="utf-8") as rendered:
                     rendered.write(updated)
 

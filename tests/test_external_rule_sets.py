@@ -6,12 +6,11 @@ import sys
 import unittest
 from pathlib import Path
 
-import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "subscribe"))
 from external_rule_sets import (RAW_BASE, registry, tag_for, exported_files,
-                                read_rules, externalize_clash, externalize_surge,
+                                read_rules, externalize_surge,
                                 externalize_singbox, sync_exports)
 from profile_layout import apply_profile_layout
 from singbox_layout import apply_singbox_layout
@@ -40,26 +39,20 @@ class ExternalRulesTests(unittest.TestCase):
         self.assertIn('DOMAIN-SUFFIX,facebook.com', read_rules('rules/custom/GlobalProxy.list'))
         self.assertTrue(read_rules('rules/auto/GlobalProxy.list'))
 
-    def test_clash_references_remote_text_and_leaves_endpoints_dns_intact(self):
-        source = yaml.safe_dump({
-            'proxies':[{'name':'🇯🇵 日本 001','type':'ss','server':'server.example','password':'secret'}],
-            'proxy-groups': None, 'dns':{'nameserver':['223.5.5.5']},
-            'rules': ['DOMAIN-SUFFIX,facebook.com,漏网之鱼', 'MATCH,漏网之鱼']
-        }, allow_unicode=True, sort_keys=False)
-        result = externalize_clash(apply_profile_layout(source, 'clash'))
-        data = yaml.safe_load(result)
-        self.assertEqual(data['dns'], {'nameserver':['223.5.5.5']})
-        self.assertEqual(data['proxies'][0]['password'], 'secret')
-        self.assertEqual(data['proxies'][0]['server'], 'server.example')
-        self.assertEqual(len(data['rules']), len(registry()))
-        self.assertIn('RULE-SET,auto_GlobalProxy,全球加速', data['rules'])
-        self.assertLess(data['rules'].index('RULE-SET,custom_AI,AI服务'),
-                        data['rules'].index('RULE-SET,auto_GlobalProxy,全球加速'))
-        self.assertLess(data['rules'].index('RULE-SET,custom_ChinaDirect,DIRECT'),
-                        data['rules'].index('RULE-SET,auto_GlobalProxy,全球加速'))
-        self.assertEqual(data['rules'][-2:], ['GEOIP,CN,DIRECT','MATCH,漏网之鱼'])
-        self.assertEqual(data['rule-providers']['auto_GlobalProxy']['format'],'text')
-        self.assertTrue(all(x['url'].startswith(RAW_BASE) for x in data['rule-providers'].values()))
+    def test_clash_mi_uses_stable_inline_subconverter_rules(self):
+        # Clash now keeps SubConverter's original inline rules. No remote
+        # rule providers can fail during first boot. Other formats remain external.
+        collect = (ROOT / 'subscribe/collect.py').read_text('utf-8')
+        self.assertNotIn('externalize_clash(updated)', collect)
+        self.assertIn("target_name == 'surge'", collect)
+        self.assertIn('externalize_surge(updated)', collect)
+        names = [r['ruleset'] for r in registry()]
+        self.assertLess(names.index('rules/custom/BilibiliRegion.list'),
+                        names.index('rules/custom/ChinaDirect.list'))
+        bilibili = read_rules('rules/custom/BilibiliRegion.list')
+        self.assertIn('DOMAIN,www.bilibili.com', bilibili)
+        self.assertIn('DOMAIN,m.bilibili.com', bilibili)
+        self.assertIn('DOMAIN-KEYWORD,cn-hk-eq-bcache-', bilibili)
 
     def test_surge_remote_sets_and_pure_proxy_section(self):
         source = '[General]\ndns-server = 223.5.5.5\n[Proxy]\n🇯🇵 日本 001 = ss, x, 443, encrypt-method=aes-128-gcm, password=secret\n[Proxy Group]\n全球加速 = select, 🇯🇵 日本 001\n[Rule]\nDOMAIN-SUFFIX,example.com,DIRECT\nFINAL,漏网之鱼\n[Host]\nwww.example.com = 1.1.1.1\n'
@@ -102,7 +95,7 @@ class ExternalRulesTests(unittest.TestCase):
         self.assertIn('subconverter/rules/export/singbox',weekly)
         self.assertIn('subconverter/rules/custom',weekly)
         collect = (ROOT / 'subscribe/collect.py').read_text('utf-8')
-        for func in ('externalize_clash','externalize_surge','externalize_singbox'):
+        for func in ('externalize_surge','externalize_singbox'):
             self.assertIn(func, collect)
 
 

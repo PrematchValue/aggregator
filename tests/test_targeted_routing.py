@@ -20,6 +20,8 @@ def match_rule(domain: str, expression: str) -> bool:
         return domain == arg
     if kind == "DOMAIN-SUFFIX":
         return domain == arg or domain.endswith("." + arg)
+    if kind == "DOMAIN-KEYWORD":
+        return arg in domain
     return False
 
 
@@ -38,11 +40,14 @@ def route_domain(domain: str) -> str:
 class TargetedRoutingTests(unittest.TestCase):
     def test_bilibili_region_and_domestic_mainland_media_do_not_overlap_undesirably(self):
         for domain in ("api.bilibili.com", "app.bilibili.com", "bilibili.tv",
-                       "api.bilibili.tv", "upos-hz-mirrorakam.akamaized.net"):
+                       "api.bilibili.tv", "upos-hz-mirrorakam.akamaized.net",
+                       "www.bilibili.com", "m.bilibili.com", "api.biliapi.net",
+                       "grpc.biliapi.net", "cn-hk-eq-bcache-11.example.net",
+                       "cache.video.iqiyi.com", "mobileso.bz.mgtv.com"):
             with self.subTest(domain=domain):
                 self.assertEqual(route_domain(domain), "港台番剧")
-        for domain in ("www.bilibili.com", "mall.bilibili.com",
-                       "upos-sz-mirrorali.bilivideo.com", "static.hdslb.com"):
+        for domain in ("mall.bilibili.com", "upos-sz-mirrorali.bilivideo.com",
+                       "static.hdslb.com", "www.iqiyi.com"):
             with self.subTest(domain=domain):
                 self.assertEqual(route_domain(domain), "DIRECT")
         regional = (ROOT / "subconverter/rules/custom/BilibiliRegion.list").read_text(encoding="utf-8")
