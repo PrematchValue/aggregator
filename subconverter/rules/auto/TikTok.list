@@ -1,5 +1,5 @@
 # AUTO-GENERATED: trusted, service-filtered upstream supplement.
-# Source: https://ruleset.skk.moe/List/non_ip/stream.conf (SukkaW/Surge, AGPL-3.0)
+# Source: https://ruleset.skk.moe/List/non_ip/stream.conf (SukkaW/Surge or ConnersHua/RuleGo)
 # Handwritten ../custom/ rules always take precedence.
 DOMAIN-SUFFIX,tiktok.us
 DOMAIN-SUFFIX,muscdn.com
