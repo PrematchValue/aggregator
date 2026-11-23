@@ -376,7 +376,6 @@ def aggregate(args: argparse.Namespace) -> None:
                     profile = rendered.read()
                 updated = apply_profile_layout(profile, target_name)
                 if target_name == 'clash':
-                    import yaml
                     document = yaml.safe_load(updated)
                     if not document.get('rules') and not document.get('Rule'):
                         raise ValueError('Clash rule list missing')

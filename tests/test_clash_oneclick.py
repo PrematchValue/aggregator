@@ -50,6 +50,21 @@ class ClashOneClickTests(unittest.TestCase):
         self.assertIn('国内直连', groups['苹果推送']['proxies'])
         self.assertNotIn('♻️ 自动选择', groups)
 
+    def test_aggregate_does_not_shadow_yaml(self):
+        import ast
+        source = (ROOT / "subscribe/collect.py").read_text(encoding="utf-8")
+        module = ast.parse(source)
+        aggregate = next(
+            n for n in module.body
+            if isinstance(n, ast.FunctionDef) and n.name == "aggregate"
+        )
+        imports = [
+            n for n in ast.walk(aggregate)
+            if isinstance(n, ast.Import)
+            and any(a.name == "yaml" for a in n.names)
+        ]
+        self.assertFalse(imports, "aggregate() 不得重复导入 yaml")
+
     def test_local_rules_reference_defined_service_groups(self):
         from sys import path as module_path
         module_path.insert(0, str(ROOT / 'subscribe'))
