@@ -26,7 +26,7 @@ def apply_singbox_layout(text: str) -> str:
     tags = [o.get("tag") for o in outbounds]
     if any(not isinstance(t, str) or not t for t in tags) or len(set(tags)) != len(tags):
         raise ValueError("missing or duplicate sing-box outbound tags")
-    reserved = {"全球加速", "国内直连", *SERVICES, SPECIAL,
+    reserved = {"节点选择", "国内直连", *SERVICES, SPECIAL,
                 "香港节点", "台湾节点", "狮城节点", "日本节点", "美国节点"}
     if reserved.intersection(tags):
         raise ValueError("existing sing-box outbound conflicts with local policy")
@@ -38,7 +38,7 @@ def apply_singbox_layout(text: str) -> str:
     candidates = [s for s in servers if isinstance(s, dict) and s.get("tag") == "dns_proxy"] if isinstance(servers, list) else []
     if len(candidates) != 1:
         raise ValueError("missing or ambiguous proxy DNS server")
-    candidates[0]["detour"] = "全球加速"
+    candidates[0]["detour"] = "节点选择"
 
     # SubConverter versions may emit the removed legacy `dns` outbound.
     # Its rule is now a native DNS hijack action; never expose it as proxy.
@@ -71,7 +71,7 @@ def apply_singbox_layout(text: str) -> str:
     if not native_direct:
         doc["outbounds"].insert(0, {"type": "direct", "tag": "DIRECT"})
 
-    extra = [{"type": "selector", "tag": "全球加速", "outbounds": enabled}]
+    extra = [{"type": "selector", "tag": "节点选择", "outbounds": enabled}]
     extra.extend({"type": "selector", "tag": name,
                   "outbounds": service_choices(name, enabled, "DIRECT")}
                  for name in SERVICES)

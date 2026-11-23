@@ -15,7 +15,11 @@ class ProfileAndScheduleTests(unittest.TestCase):
         text = TEMPLATE.read_text(encoding="utf-8")
         surge = text.split('{% if request.target == "surge" %}', 1)[1].split('{% if request.target == "loon" %}', 1)[0]
         self.assertIn("encrypted-dns-server =", surge)
-        self.assertIn("dns-server =", surge)
+        self.assertIn("dns-server = 223.5.5.5, 119.29.29.29", surge)
+        self.assertNotIn("dns-server = system", surge)
+        surfboard = text.split('{% if request.target == "surfboard" %}',1)[1].split('{% endif %}',1)[0]
+        self.assertIn("dns-server = 223.5.5.5", surfboard)
+        self.assertNotIn("dns-server = system", surfboard)
         self.assertNotIn("[MITM]", surge)
         self.assertNotIn("ca-p12", surge)
         self.assertNotIn("script-path", surge)
@@ -39,7 +43,7 @@ class ProfileAndScheduleTests(unittest.TestCase):
 
     def test_singbox_dns_detour_group_exists(self):
         template = TEMPLATE.read_text(encoding='utf-8')
-        self.assertEqual(template.count('#全球加速'), 2)
+        self.assertEqual(template.count('#节点选择'), 2)
         pref = tomllib.loads((ROOT/'subconverter/pref.toml').read_text(encoding='utf-8'))
         keyed = {g['key']:g['value'] for g in pref['template']['globals']}
         self.assertEqual(keyed['singbox.allow_lan'], 'false')

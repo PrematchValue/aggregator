@@ -39,8 +39,8 @@ def route_domain(domain: str) -> str:
 
 class TargetedRoutingTests(unittest.TestCase):
     def test_bilibili_region_and_domestic_mainland_media_do_not_overlap_undesirably(self):
-        for domain in ("api.bilibili.com", "app.bilibili.com", "bilibili.tv",
-                       "api.bilibili.tv", "upos-hz-mirrorakam.akamaized.net",
+        for domain in ("api.bilibili.com", "app.bilibili.com",
+                       "upos-hz-mirrorakam.akamaized.net",
                        "www.bilibili.com", "m.bilibili.com", "api.biliapi.net",
                        "grpc.biliapi.net", "cn-hk-eq-bcache-11.example.net",
                        "cache.video.iqiyi.com", "mobileso.bz.mgtv.com"):
@@ -50,7 +50,7 @@ class TargetedRoutingTests(unittest.TestCase):
                        "static.hdslb.com", "www.iqiyi.com"):
             with self.subTest(domain=domain):
                 self.assertEqual(route_domain(domain), "DIRECT")
-        regional = (ROOT / "subconverter/rules/custom/BilibiliRegion.list").read_text(encoding="utf-8")
+        regional = (ROOT / "subconverter/rules/auto/StreamingCN.list").read_text(encoding="utf-8")
         self.assertNotIn("DOMAIN-SUFFIX,bilivideo.com", regional)
         self.assertNotIn("DOMAIN-SUFFIX,hdslb.com", regional)
 
@@ -79,12 +79,12 @@ class TargetedRoutingTests(unittest.TestCase):
         }
         result = json.loads(apply_singbox_layout(json.dumps(source)))
         tags = {o["tag"]: o for o in result["outbounds"]}
-        self.assertEqual(result["dns"]["servers"][0]["detour"], "全球加速")
-        self.assertEqual(tags["全球加速"]["outbounds"], ["香港节点", "狮城节点", "特殊节点"])
+        self.assertEqual(result["dns"]["servers"][0]["detour"], "节点选择")
+        self.assertEqual(tags["节点选择"]["outbounds"], ["香港节点", "狮城节点", "特殊节点"])
         self.assertEqual(tags["香港节点"]["type"], "urltest")
         self.assertEqual(tags["特殊节点"]["type"], "selector")
         self.assertEqual(tags["冷钱包"]["outbounds"][-1], "DIRECT")
-        self.assertEqual(tags["漏网之鱼"]["outbounds"], ["全球加速", "DIRECT"])
+        self.assertEqual(tags["漏网之鱼"]["outbounds"], ["节点选择", "DIRECT"])
         self.assertNotIn("国内直连", tags)
         self.assertNotIn("REJECT", tags)
         self.assertNotIn("GLOBAL", tags)
@@ -122,7 +122,7 @@ class TargetedRoutingTests(unittest.TestCase):
     def test_singbox_uses_correct_template_and_conversion_hook(self):
         template = (ROOT / "subconverter/base/all_base.tpl").read_text(encoding="utf-8")
         self.assertNotIn('\"detour\": \"🔰 节点选择\"', template)
-        self.assertIn('\"detour\": \"全球加速\"', template)
+        self.assertIn('\"detour\": \"节点选择\"', template)
         pref = (ROOT / "subconverter/pref.toml").read_text(encoding="utf-8")
         self.assertIn("singbox_add_clash_modes = false", pref)
         collect = (ROOT / "subscribe/collect.py").read_text(encoding="utf-8")

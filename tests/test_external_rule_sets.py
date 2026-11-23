@@ -34,9 +34,10 @@ class ExternalRulesTests(unittest.TestCase):
         names = [e['ruleset'] for e in items]
         global_at = names.index('rules/auto/GlobalProxy.list')
         self.assertGreater(global_at, names.index('rules/custom/ChinaDirect.list'))
+        self.assertNotIn('rules/custom/GlobalProxy.list',names)
         self.assertGreater(global_at, names.index('rules/custom/AppleService.list'))
         self.assertLess(global_at, names.index('[]GEOIP,CN'))
-        self.assertIn('DOMAIN-SUFFIX,facebook.com', read_rules('rules/custom/GlobalProxy.list'))
+        self.assertIn('DOMAIN-KEYWORD,.facebook.', read_rules('rules/auto/GlobalProxy.list'))
         self.assertTrue(read_rules('rules/auto/GlobalProxy.list'))
 
     def test_clash_mi_uses_inline_subconverter_rules(self):
@@ -53,15 +54,18 @@ class ExternalRulesTests(unittest.TestCase):
         self.assertIn('DOMAIN-KEYWORD,cn-hk-eq-bcache-', read_rules('rules/auto/StreamingCN.list'))
 
     def test_surge_remote_sets_and_pure_proxy_section(self):
-        source = '[General]\ndns-server = 223.5.5.5\n[Proxy]\n🇯🇵 日本 001 = ss, x, 443, encrypt-method=aes-128-gcm, password=secret\n[Proxy Group]\n全球加速 = select, 🇯🇵 日本 001\n[Rule]\nDOMAIN-SUFFIX,example.com,DIRECT\nFINAL,漏网之鱼\n[Host]\nwww.example.com = 1.1.1.1\n'
+        source = '[General]\ndns-server = 223.5.5.5\n[Proxy]\n🇯🇵 日本 001 = ss, x, 443, encrypt-method=aes-128-gcm, password=secret\n[Proxy Group]\n节点选择 = select, 🇯🇵 日本 001\n[Rule]\nDOMAIN-SUFFIX,example.com,DIRECT\nFINAL,漏网之鱼\n[Host]\nwww.example.com = 1.1.1.1\n'
         result = externalize_surge(apply_profile_layout(source, 'surge'))
         self.assertIn('[Host]\nwww.example.com = 1.1.1.1', result)
         self.assertIn('🇯🇵 日本 001 = ss, x', result)
-        self.assertIn('RULE-SET,' + RAW_BASE + 'rules/auto/GlobalProxy.list,全球加速,update-interval=86400',result)
+        self.assertIn('RULE-SET,' + RAW_BASE + 'rules/auto/GlobalProxy.list,节点选择,update-interval=86400',result)
         self.assertLess(result.index('rules/custom/ChinaDirect.list,国内直连'),
-                        result.index('rules/auto/GlobalProxy.list,全球加速'))
+                        result.index('rules/auto/GlobalProxy.list,节点选择'))
         self.assertTrue(result.rstrip().endswith('www.example.com = 1.1.1.1'))
         self.assertEqual(result.count('FINAL,漏网之鱼'),1)
+        self.assertNotIn('Google语音',result)
+        self.assertNotIn('AI服务',result)
+        self.assertIn('rules/auto/InternationalMediaFull.list,国际媒体',result)
 
     def test_singbox_json_external_and_preserves_dns_sniff(self):
         sample = {'dns': {'servers':[{'type':'https','tag':'dns_proxy','server':'1.1.1.1'}]},
@@ -76,10 +80,12 @@ class ExternalRulesTests(unittest.TestCase):
         self.assertTrue(all(s['type']=='remote' for s in rule_sets))
         self.assertEqual(obj['route']['rules'][0]['action'], 'hijack-dns')
         self.assertEqual(obj['route']['final'], '漏网之鱼')
-        self.assertIn({'rule_set':'auto_GlobalProxy','outbound':'全球加速'},obj['route']['rules'])
+        self.assertIn({'rule_set':'auto_GlobalProxy','outbound':'节点选择'},obj['route']['rules'])
         self.assertIn({'rule_set':'geoip-cn','outbound':'DIRECT'},obj['route']['rules'])
-        self.assertIn({'rule_set':'custom_BlockAds','action':'reject'},obj['route']['rules'])
+        self.assertIn({'rule_set':'auto_Advertising','action':'reject'},obj['route']['rules'])
         self.assertTrue(obj['experimental']['cache_file']['enabled'])
+        self.assertNotIn('Google语音',[o['tag'] for o in obj['outbounds']])
+        self.assertNotIn('AI服务',[o['tag'] for o in obj['outbounds']])
         self.assertEqual(obj['outbounds'][0]['server'],'x.example') if obj['outbounds'][0].get('type')=='trojan' else self.assertTrue(any(o.get('server')=='x.example' for o in obj['outbounds']))
         self.assertIn('https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs',[x['url'] for x in rule_sets])
 

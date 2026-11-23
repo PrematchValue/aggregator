@@ -36,7 +36,7 @@ class ClashOneClickTests(unittest.TestCase):
         self.assertEqual(dns["listen"], "127.0.0.1:1053")
         self.assertIn("geosite:cn,private", dns["nameserver-policy"])
         self.assertEqual(len(dns["proxy-server-nameserver"]), 2)
-        self.assertTrue(all("#全球加速" in x for x in dns["nameserver"]))
+        self.assertTrue(all("#节点选择" in x for x in dns["nameserver"]))
         self.assertIn("+.lan", dns["fake-ip-filter"])
         self.assertIn("captive.apple.com", dns["fake-ip-filter"])
 
@@ -45,8 +45,10 @@ class ClashOneClickTests(unittest.TestCase):
         module_path.insert(0, str(ROOT / 'subscribe'))
         from profile_layout import groups_for_clash
         groups = {g['name']: g for g in groups_for_clash(['🇭🇰 香港 001', '🇯🇵 日本 001'])}
-        self.assertEqual(groups['全球加速']['proxies'], ['香港节点', '日本节点'])
-        self.assertNotIn('DIRECT', groups['全球加速']['proxies'])
+        self.assertEqual(groups['节点选择']['proxies'], ['香港节点', '日本节点'])
+        self.assertIn('人工智能', groups)
+        self.assertNotIn('AI服务', groups)
+        self.assertNotIn('DIRECT', groups['节点选择']['proxies'])
         self.assertIn('国内直连', groups['苹果推送']['proxies'])
         self.assertNotIn('♻️ 自动选择', groups)
 
@@ -70,7 +72,7 @@ class ClashOneClickTests(unittest.TestCase):
         module_path.insert(0, str(ROOT / 'subscribe'))
         from profile_layout import SERVICES
         rules = tomllib.loads((ROOT / 'subconverter/snippets/rulesets.toml').read_text(encoding='utf-8'))
-        names = set(SERVICES) | {'DIRECT', 'REJECT', '全球加速'}
+        names = set(SERVICES) | {'DIRECT', 'REJECT', '节点选择'}
         for rule in rules['rulesets']:
             self.assertIn(rule['group'], names)
         self.assertEqual(rules['rulesets'][-1]['ruleset'], '[]FINAL')

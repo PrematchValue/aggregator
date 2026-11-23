@@ -12,16 +12,15 @@ import yaml
 
 ICON_BASE = "https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/"
 ICONS = {
-    "全球加速": "Global.png",
+    "节点选择": "Proxy.png",
     "苹果服务": "Apple.png",
     "苹果推送": "iCloud.png",
     "Google服务": "Google_Search.png",
-    "Google语音": "Google_Search.png",
     "GitHub服务": "GitHub.png",
     "微软服务": "Windows.png",
     "国际媒体": "Streaming.png",
     "港台番剧": "bilibili_3.png",
-    "AI服务": "AI.png",
+    "人工智能": "Bot.png",
     "TikTok": "TikTok.png",
     "Telegram": "Telegram.png",
     "数字资产": "Cryptocurrency_3.png",
@@ -35,9 +34,9 @@ ICONS = {
     "特殊节点": "Available.png",
 }
 SERVICES = (
-    "苹果服务", "苹果推送", "Google服务", "Google语音",
-    "GitHub服务", "微软服务", "国际媒体", "港台番剧",
-    "AI服务", "TikTok", "Telegram", "数字资产", "冷钱包", "漏网之鱼",
+    "人工智能", "苹果推送", "苹果服务", "微软服务", "GitHub服务",
+    "Google服务", "国际媒体", "港台番剧", "TikTok",
+    "Telegram", "数字资产", "冷钱包", "漏网之鱼",
 )
 REGIONS = (
     ("香港节点", "🇭🇰 香港 "),
@@ -76,12 +75,11 @@ def build_members(names: list[str]) -> tuple[list[str], dict[str, list[str]]]:
 def service_choices(name: str, enabled: list[str], direct: str) -> list[str]:
     """Move only the requested first choice; retain all other relative order."""
     if name == "漏网之鱼":
-        return ["全球加速", direct]
+        return ["节点选择", direct]
     choices = [*enabled, direct]
     first = {"苹果服务": direct, "港台番剧": direct,
-             "AI服务": "日本节点", "TikTok": "日本节点",
-             "GitHub服务": "香港节点", "微软服务": "美国节点",
-             "Google语音": "美国节点"}.get(name)
+             "人工智能": "日本节点", "TikTok": "日本节点",
+             "GitHub服务": "香港节点", "微软服务": "美国节点"}.get(name)
     if first in choices:
         choices.remove(first)
         choices.insert(0, first)
@@ -90,8 +88,8 @@ def service_choices(name: str, enabled: list[str], direct: str) -> list[str]:
 
 def groups_for_clash(names: list[str]) -> list[dict]:
     enabled, by_region = build_members(names)
-    groups = [{"name": "全球加速", "type": "select", "proxies": enabled,
-               "icon": ICON_BASE + ICONS["全球加速"]}]
+    groups = [{"name": "节点选择", "type": "select", "proxies": enabled,
+               "icon": ICON_BASE + ICONS["节点选择"]}]
     for name in SERVICES:
         groups.append({"name": name, "type": "select",
                        "proxies": service_choices(name, enabled, "国内直连"),
@@ -208,7 +206,7 @@ def _surge_layout(text: str) -> str:
     enabled, _ = build_members(names)
     icon = lambda name: f"icon-url={ICON_BASE}{ICONS[name]}"
     group_lines = ["[Proxy Group]",
-                   "全球加速 = select, " + ", ".join([*enabled, icon("全球加速")])]
+                   "节点选择 = select, " + ", ".join([*enabled, icon("节点选择")])]
     group_lines.extend(
         f"{name} = select, {', '.join(service_choices(name, enabled, '国内直连'))}, {icon(name)}"
         for name in SERVICES

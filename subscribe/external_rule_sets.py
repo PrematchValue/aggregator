@@ -113,8 +113,12 @@ def sync_exports(root: Path = ROOT, *, check: bool = False) -> int:
             if not check:
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_text(expected, "utf-8")
-    if check and changed:
-        raise ValueError(f"{changed} sing-box rule exports are stale; run --write")
+    stale = set((root / "subconverter" / SB_EXPORT).glob("*.json")) - {root / p for p in files}
+    if check and (changed or stale):
+        raise ValueError(f"{changed} sing-box exports stale, {len(stale)} obsolete exports; run --write")
+    if not check:
+        for p in sorted(stale):
+            p.unlink()
     return changed
 
 

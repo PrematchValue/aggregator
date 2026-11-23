@@ -36,46 +36,6 @@ class Source:
 
 
 SOURCES = (
-    Source("AI.list", "non_ip/ai.conf", "AI.list", (
-        "openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com",
-        "anthropic.com", "claude.com", "claude.ai", "perplexity.ai",
-        "grok.com", "x.ai", "poe.com", "meta.ai", "sora.com",
-        "chat.com", "groq.com", "openrouter.ai", "gemini.google", "gemini.google.com",
-        "aistudio.google.com", "generativelanguage.googleapis.com",
-        "notebooklm.google", "notebooklm.google.com", "generativeai.google",
-        "deepmind.google", "geller-pa.googleapis.com", "dify.ai", "jasper.ai",
-        "cursor.sh", "clau.de", "g.ai", "ai.com", "clipdrop.co",
-        "chatgpt.site", "cloudcode-pa.googleapis.com", "proactivebackend-pa.googleapis.com",
-    ), "DOMAIN-SUFFIX,chatgpt.com", 9),
-    Source("AppleService.list", "non_ip/apple_services.conf", "AppleService.list", (
-        "apple.com", "apple.co", "appsto.re", "appstore.com", "apple.news",
-        "icloud.com", "itunes.com", "aaplimg.com", "apple-dns.net",
-        "cdn-apple.com", "apple-mapkit.com", "apple-cloudkit.com",
-        "icloud-content.com", "organicfruitapps.com", "me.com",
-    ), "DOMAIN-SUFFIX,apple.com", 8),
-    Source("TikTok.list", "non_ip/stream.conf", "TikTok.list", (
-        "tiktok.com", "tiktok.us", "tiktokv.com", "tiktokv.us", "tiktokw.com",
-        "tiktokcdn.com", "musical.ly", "muscdn.com", "byteoversea.com",
-        "ibytedtos.com", "ipstatp.com", "isnssdk.com", "tik-tokapi.com",
-    ), "DOMAIN-SUFFIX,tiktok.com", 6),
-    Source("InternationalMedia.list", "non_ip/stream.conf", "InternationalMedia.list", (
-        "youtube.com", "youtube-nocookie.com", "googlevideo.com", "ytimg.com",
-        "netflix.com", "netflix.net", "nflxvideo.net", "nflximg.net",
-        "nflxso.net", "nflxext.com", "nflxsearch.net", "disneyplus.com",
-        "disney-plus.net", "dssott.com", "bamgrid.com", "hulu.com",
-        "spotify.com", "spotifycdn.com", "scdn.co", "twitch.tv",
-        "ttvnw.net", "jtvnw.net", "primevideo.com", "primevideo.tv",
-        "amazonvideo.com", "hbomax.com", "max.com", "hbo.com",
-        "peacocktv.com", "paramountplus.com", "discoveryplus.com",
-        "crunchyroll.com", "soundcloud.com", "twitchcdn.net",
-    ), "DOMAIN-SUFFIX,netflix.com", 12),
-    Source("TelegramDomain.list", "non_ip/telegram.conf", "Telegram.list", (
-        "t.me", "tx.me", "tg.dev", "legra.ph", "graph.org", "telega.one",
-        "telegra.ph", "telesco.pe", "telegram.me", "tdesktop.com",
-        "telegram.dog", "telegram.org", "telegram.space", "cdn-telegram.org",
-    ), "DOMAIN-SUFFIX,telegram.org", 8),
-    Source("TelegramIP.list", "ip/telegram.conf", "Telegram.list", (),
-           "IP-CIDR,149.154.160.0/20,no-resolve", 7, True),
     Source("GlobalProxy.list", "global/Proxy.list", "GlobalProxy.list", (),
            "DOMAIN-SUFFIX,fbcdn.net", 25, False, GLOBAL_URL, True),
 )
@@ -222,7 +182,7 @@ def update(root: Path = ROOT, downloader=download) -> dict[str, str]:
             url = spec.source_url or SOURCE_BASE + spec.remote_path
             if url not in cache:
                 cache[url] = downloader(url)
-            new = snapshot(spec, cache[url], base_text=base.read_text("utf-8"))
+            new = snapshot(spec, cache[url], base_text=base.read_text("utf-8") if base.is_file() else "")
             validate_snapshot_file(spec, new)
             old = dst.read_text("utf-8")
             validate_snapshot_file(spec, old)

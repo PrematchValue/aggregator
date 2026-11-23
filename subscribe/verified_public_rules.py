@@ -27,13 +27,10 @@ class PublicSource:
 SOURCES = (
     PublicSource("Advertising.list", RULEGO+"Extra/Reject/Advertising.list", 850, 1200, "DOMAIN-SUFFIX,17gouwuba.com"),
     PublicSource("Tracking.list", RULEGO+"Extra/Reject/Tracking.list", 75, 170, "DOMAIN-SUFFIX,adjust.com"),
-    PublicSource("DirectPlus.list", RULEGO+"Direct+.list", 17, 80, "DOMAIN,app.adjust.com"),
     PublicSource("StreamingCN.list", RULEGO+"Extra/Streaming/CN.list", 14, 50, "DOMAIN,www.bilibili.com"),
     PublicSource("InternationalMediaFull.list", RULEGO+"Extra/Streaming/!CN.list", 170, 360, "DOMAIN-SUFFIX,netflix.com"),
     PublicSource("GitHubService.list", BLACKMATRIX+"GitHub/GitHub.list", 25, 100, "DOMAIN-SUFFIX,github.com"),
     PublicSource("MicrosoftService.list", BLACKMATRIX+"Microsoft/Microsoft.list", 560, 760, "DOMAIN-SUFFIX,microsoft.com"),
-    PublicSource("Direct.list", RULEGO+"Direct.list", 17, 70, "DOMAIN-SUFFIX,flyert.com"),
-    PublicSource("WeChat.list", RULEGO+"Extra/WeChat.list", 10, 70, "DOMAIN-SUFFIX,wechat.com"),
 )
 ALLOWED_KINDS = {"DOMAIN", "DOMAIN-SUFFIX", "DOMAIN-KEYWORD", "IP-CIDR", "IP-CIDR6"}
 DOMAIN = re.compile(r"[a-zA-Z0-9*_.-]{2,253}")
@@ -79,8 +76,22 @@ def normalized(text: str) -> list[str]:
             seen.add(rule)
     return out
 
+
+# TikTok APIs/CDN must remain under the dedicated TikTok policy. The upstream
+# international-media list contains TikTok too: remove only those entries.
+_TIKTOK_MARKERS = (
+    "tiktok", "tik-tokapi", "byteoversea", "ibytedtos", "ibyteimg",
+    "muscdn", "musical.ly", "ttwstatic", "isnssdk", "snssdk",
+    "ipstatp", "sgpstatp",
+)
+
+def is_tiktok_rule(line: str) -> bool:
+    return any(fragment in line.lower() for fragment in _TIKTOK_MARKERS)
+
 def snapshot(spec: PublicSource, raw: str) -> str:
     rows = normalized(raw)
+    if spec.name == "InternationalMediaFull.list":
+        rows = [x for x in rows if not is_tiktok_rule(x)]
     if not spec.minimum <= len(rows) <= spec.maximum or spec.anchor not in rows:
         raise ValueError(f"{spec.name}: unusual rule source count/anchor {len(rows)}")
     return "# VERIFIED-PUBLIC: category snapshot for Clash, Surge and sing-box\n" + f"# Source: {spec.url}\n" + "\n".join(rows) + "\n"
@@ -91,6 +102,8 @@ def check_snapshot(spec: PublicSource, content: str) -> None:
     data = [x for x in content.splitlines() if x.strip() and not x.startswith("#")]
     if len(data) != len(set(data)) or not spec.minimum <= len(data) <= spec.maximum:
         raise ValueError(f"{spec.name}: bad snapshot count")
+    if spec.name == "InternationalMediaFull.list" and any(is_tiktok_rule(x) for x in data):
+        raise ValueError(f"{spec.name}: TikTok must use dedicated policy")
     if data != normalized("\n".join(data)) or spec.anchor not in data:
         raise ValueError(f"{spec.name}: invalid snapshot entries")
 
