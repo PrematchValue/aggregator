@@ -1,15 +1,18 @@
 name: Verify Aggregator changes
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
       - 'subscribe/**'
       - 'tests/**'
+      - 'subconverter/**'
       - '.github/workflows/**'
   pull_request:
     paths:
       - 'subscribe/**'
       - 'tests/**'
+      - 'subconverter/**'
       - '.github/workflows/**'
 permissions:
   contents: read
