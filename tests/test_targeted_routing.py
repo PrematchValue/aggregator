@@ -46,10 +46,17 @@ class TargetedRoutingTests(unittest.TestCase):
                        "cache.video.iqiyi.com", "mobileso.bz.mgtv.com"):
             with self.subTest(domain=domain):
                 self.assertEqual(route_domain(domain), "港台番剧")
-        for domain in ("mall.bilibili.com", "upos-sz-mirrorali.bilivideo.com",
-                       "static.hdslb.com", "www.iqiyi.com"):
+        # The original Streaming/CN rule-set is intentionally selective.
+        # Do not force whole Bilibili/CDN suffixes to DIRECT before GEOIP/fallback.
+        for domain in ("data.bilibili.com", "show.bilibili.com",
+                       "mall.bilibili.com", "member.bilibili.com",
+                       "upos-sz-mirrorali.bilivideo.com", "static.hdslb.com"):
             with self.subTest(domain=domain):
-                self.assertEqual(route_domain(domain), "DIRECT")
+                self.assertNotEqual(route_domain(domain), "DIRECT")
+        self.assertEqual(route_domain("www.iqiyi.com"), "DIRECT")
+        direct = (ROOT / "subconverter/rules/custom/ChinaDirect.list").read_text(encoding="utf-8")
+        for suffix in ("bilibili.com", "bilivideo.com", "hdslb.com"):
+            self.assertNotIn(f"DOMAIN-SUFFIX,{suffix}\n", direct)
         regional = (ROOT / "subconverter/rules/auto/StreamingCN.list").read_text(encoding="utf-8")
         self.assertNotIn("DOMAIN-SUFFIX,bilivideo.com", regional)
         self.assertNotIn("DOMAIN-SUFFIX,hdslb.com", regional)
