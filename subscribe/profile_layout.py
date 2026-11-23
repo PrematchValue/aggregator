@@ -15,7 +15,7 @@ ICONS = {
     "节点选择": "Proxy.png",
     "苹果服务": "Apple.png",
     "苹果推送": "iCloud.png",
-    "Google服务": "Google_Search.png",
+    "谷歌服务": "Google_Search.png",
     "GitHub服务": "GitHub.png",
     "微软服务": "Windows.png",
     "国际媒体": "Streaming.png",
@@ -34,8 +34,8 @@ ICONS = {
     "特殊节点": "Available.png",
 }
 SERVICES = (
-    "人工智能", "苹果推送", "苹果服务", "微软服务", "GitHub服务",
-    "Google服务", "国际媒体", "港台番剧", "TikTok",
+    "人工智能", "苹果推送", "苹果服务", "微软服务", "谷歌服务",
+    "GitHub服务", "TikTok", "国际媒体", "港台番剧",
     "Telegram", "数字资产", "冷钱包", "漏网之鱼",
 )
 REGIONS = (

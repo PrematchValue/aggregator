@@ -38,7 +38,7 @@ class PolicyLayoutTests(unittest.TestCase):
         }
         self.assertNotIn("Google语音", groups)
         self.assertEqual(list(groups)[:6],
-                         ["节点选择", "人工智能", "苹果推送", "苹果服务", "微软服务", "GitHub服务"])
+                         ["节点选择", "人工智能", "苹果推送", "苹果服务", "微软服务", "谷歌服务"])
         for name in SERVICES:
             self.assertEqual(groups[name]["proxies"], expected.get(name, normal))
         for name, expected in zip(["香港节点", "台湾节点", "日本节点", "狮城节点", "美国节点", "特殊节点"], NAMES):
@@ -48,7 +48,9 @@ class PolicyLayoutTests(unittest.TestCase):
         self.assertNotIn("节点选择", groups["人工智能"]["proxies"])
         self.assertNotIn("DIRECT", groups["人工智能"]["proxies"])
         self.assertNotIn("国内直连", groups["节点选择"]["proxies"])
-        self.assertTrue(groups["Google服务"]["icon"].endswith("/Google_Search.png"))
+        self.assertTrue(groups["谷歌服务"]["icon"].endswith("/Google_Search.png"))
+        self.assertLess(list(groups).index("谷歌服务"), list(groups).index("GitHub服务"))
+        self.assertLess(list(groups).index("TikTok"), list(groups).index("国际媒体"))
         for region in ("香港节点", "台湾节点", "日本节点", "狮城节点", "美国节点"):
             self.assertEqual(groups[region]["type"], "url-test")
             self.assertEqual(groups[region]["interval"], 600)
@@ -87,6 +89,8 @@ class PolicyLayoutTests(unittest.TestCase):
         self.assertIn("国内直连$", result)
         self.assertIn("香港节点 = smart, include-all-proxies=true, policy-regex-filter=^🇭🇰", result)
         self.assertEqual(result.count("icon-url="), len(ICONS))
+        self.assertLess(result.index("\n谷歌服务 = select"), result.index("\nGitHub服务 = select"))
+        self.assertLess(result.index("\nTikTok = select"), result.index("\n国际媒体 = select"))
         self.assertNotIn("全球直连", result)
         self.assertIn("🇭🇰 香港 001 = ss,", result)
 
