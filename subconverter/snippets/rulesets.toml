@@ -1,13 +1,9 @@
-# Verified rules: ad-block -> direct exceptions -> personal services ->
-# domestic -> overseas -> GeoIP CN -> final. Source order is policy order.
+# Simplified one-source-per-category routing. Order is first match.
+# Specific services before general media and overseas catchall.
 
 [[rulesets]]
 group = "DIRECT"
 ruleset = "rules/LocalAreaNetwork.list"
-
-[[rulesets]]
-group = "REJECT"
-ruleset = "rules/custom/BlockAds.list"
 
 [[rulesets]]
 group = "REJECT"
@@ -18,20 +14,12 @@ group = "REJECT"
 ruleset = "rules/auto/Tracking.list"
 
 [[rulesets]]
-group = "DIRECT"
-ruleset = "rules/auto/DirectPlus.list"
-
-[[rulesets]]
 group = "苹果推送"
 ruleset = "rules/custom/ApplePush.list"
 
 [[rulesets]]
-group = "AI服务"
+group = "人工智能"
 ruleset = "rules/custom/AI.list"
-
-[[rulesets]]
-group = "AI服务"
-ruleset = "rules/auto/AI.list"
 
 [[rulesets]]
 group = "冷钱包"
@@ -46,24 +34,8 @@ group = "TikTok"
 ruleset = "rules/custom/TikTok.list"
 
 [[rulesets]]
-group = "TikTok"
-ruleset = "rules/auto/TikTok.list"
-
-[[rulesets]]
-group = "港台番剧"
-ruleset = "rules/custom/BilibiliRegion.list"
-
-[[rulesets]]
 group = "港台番剧"
 ruleset = "rules/auto/StreamingCN.list"
-
-[[rulesets]]
-group = "国际媒体"
-ruleset = "rules/custom/InternationalMedia.list"
-
-[[rulesets]]
-group = "国际媒体"
-ruleset = "rules/auto/InternationalMedia.list"
 
 [[rulesets]]
 group = "国际媒体"
@@ -74,20 +46,12 @@ group = "Telegram"
 ruleset = "rules/custom/Telegram.list"
 
 [[rulesets]]
-group = "Telegram"
-ruleset = "rules/auto/TelegramDomain.list"
-
-[[rulesets]]
-group = "Google语音"
-ruleset = "rules/custom/GoogleVoice.list"
+group = "微软服务"
+ruleset = "rules/auto/MicrosoftService.list"
 
 [[rulesets]]
 group = "GitHub服务"
 ruleset = "rules/auto/GitHubService.list"
-
-[[rulesets]]
-group = "微软服务"
-ruleset = "rules/auto/MicrosoftService.list"
 
 [[rulesets]]
 group = "Google服务"
@@ -98,31 +62,11 @@ group = "苹果服务"
 ruleset = "rules/custom/AppleService.list"
 
 [[rulesets]]
-group = "苹果服务"
-ruleset = "rules/auto/AppleService.list"
-
-[[rulesets]]
 group = "DIRECT"
 ruleset = "rules/custom/ChinaDirect.list"
 
 [[rulesets]]
-group = "DIRECT"
-ruleset = "rules/auto/Direct.list"
-
-[[rulesets]]
-group = "DIRECT"
-ruleset = "rules/auto/WeChat.list"
-
-[[rulesets]]
-group = "Telegram"
-ruleset = "rules/auto/TelegramIP.list"
-
-[[rulesets]]
-group = "全球加速"
-ruleset = "rules/custom/GlobalProxy.list"
-
-[[rulesets]]
-group = "全球加速"
+group = "节点选择"
 ruleset = "rules/auto/GlobalProxy.list"
 
 [[rulesets]]

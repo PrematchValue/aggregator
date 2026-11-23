@@ -121,16 +121,6 @@
         "pornhub.com",
         "pornhubpremium.com",
         "skyking.com.tw",
-        "byteoversea.com",
-        "ibytedtos.com",
-        "muscdn.com",
-        "musical.ly",
-        "tiktok.com",
-        "tik-tokapi.com",
-        "tiktokcdn.com",
-        "tiktokcdn-eu.com",
-        "tiktokv.com",
-        "ttwstatic.com",
         "tver.jp",
         "viu.com",
         "viu.tv",
@@ -163,8 +153,7 @@
         ".hbogoasia.",
         "netflixdnstest",
         "apiproxy-device-prod-nlb-",
-        "dualstack.apiproxy-",
-        "tiktokcdn-"
+        "dualstack.apiproxy-"
       ]
     },
     {

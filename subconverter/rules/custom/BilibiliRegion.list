@@ -1,5 +1,0 @@
-# Bilibili international-only, supplemental to RuleGo Streaming/CN.
-# Mainland shared video CDNs (bilivideo.com / hdslb.com) remain DIRECT.
-DOMAIN-SUFFIX,bilibili.tv
-DOMAIN-SUFFIX,bstarstatic.com
-DOMAIN,upos-sz-mirrorakam.akamaized.net

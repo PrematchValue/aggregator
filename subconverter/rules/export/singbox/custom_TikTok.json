@@ -19,12 +19,19 @@
         "tik-tokapi.com",
         "tiktok.com",
         "tiktokcdn.com",
-        "tiktokv.com"
+        "tiktokv.com",
+        "tiktok.us",
+        "tiktokv.us",
+        "tiktokw.com",
+        "isnssdk.com",
+        "tiktokcdn-eu.com",
+        "ttwstatic.com"
       ]
     },
     {
       "domain_keyword": [
-        "-tiktokcdn-com"
+        "-tiktokcdn-com",
+        "tiktokcdn-"
       ]
     }
   ]

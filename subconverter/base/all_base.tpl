@@ -46,8 +46,8 @@ dns:
       - https://dns.alidns.com/dns-query
       - https://doh.pub/dns-query
   nameserver:
-    - 'https://1.1.1.1/dns-query#全球加速'
-    - 'https://8.8.8.8/dns-query#全球加速'
+    - 'https://1.1.1.1/dns-query#节点选择'
+    - 'https://8.8.8.8/dns-query#节点选择'
 {% if local.clash.new_field_name == "true" %}
 proxies: ~
 proxy-groups: ~
@@ -68,7 +68,7 @@ bypass-system = true
 skip-proxy = localhost, *.local, *.lan, 127.0.0.1, 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12
 bypass-tun = 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12
 # Domestic encrypted DNS; no injected scripts, MITM or embedded certificates.
-dns-server = system, 223.5.5.5, 119.29.29.29
+dns-server = 223.5.5.5, 119.29.29.29
 encrypted-dns-server = https://dns.alidns.com/dns-query, https://doh.pub/dns-query
 test-timeout = 5
 
@@ -280,7 +280,7 @@ loglevel = notify
 interface = 127.0.0.1
 skip-proxy = 127.0.0.1, 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12, 100.64.0.0/10, localhost, *.local
 ipv6 = false
-dns-server = system, 223.5.5.5
+dns-server = 223.5.5.5
 exclude-simple-hostnames = true
 enhanced-mode-by-rule = true
 {% endif %}
@@ -311,7 +311,7 @@ enhanced-mode-by-rule = true
     "servers": [
       {"type": "udp", "tag": "dns_resolver", "server": "223.5.5.5"},
       {"type": "https", "tag": "dns_direct", "server": "dns.alidns.com", "path": "/dns-query", "domain_resolver": "dns_resolver"},
-      {"type": "https", "tag": "dns_proxy", "server": "1.1.1.1", "path": "/dns-query", "detour": "全球加速"},
+      {"type": "https", "tag": "dns_proxy", "server": "1.1.1.1", "path": "/dns-query", "detour": "节点选择"},
       {"type": "fakeip", "tag": "dns_fakeip", "inet4_range": "198.18.0.0/15"}
     ],
     "rules": [
