@@ -45,32 +45,57 @@ jobs:
             echo "上游没有新提交" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          protected=(
+            subconverter/base/all_base.tpl subconverter/pref.toml
+            subconverter/snippets/rulesets.toml subconverter/snippets/rulesets_remote.txt
+            subscribe/extensions subscribe/profile_layout.py subscribe/singbox_layout.py
+            subscribe/geo_labels.py subscribe/verified_nodes.py subscribe/surge_provider.py
+            subscribe/refresh_due.py subscribe/refresh_guard.py subscribe/update_rules.py
+            subscribe/external_rule_sets.py subscribe/verified_public_rules.py subscribe/output_publish.py
+            subconverter/rules/auto subconverter/rules/export/singbox subconverter/rules/custom
+            tests/test_rules_updater.py tests/test_external_rule_sets.py tests/test_public_rule_coverage.py
+            tests/test_profile_layout.py tests/test_targeted_routing.py tests/test_clash_oneclick.py
+            tests/test_profile_defaults.py tests/test_surge_provider.py tests/test_refresh_guard.py
+            tests/test_gist_retry.py tests/test_verified_nodes.py tests/test_output_publish.py
+            tests/test_upstream_geo.py tests/test_refresh_due.py tests/test_extension_dns.py
+          )
+          # Shared integration files (subscribe/collect.py, subscribe/push.py,
+          # subscribe/airport.py, subscribe/clash.py, subscribe/location.py) retain
+          # upstream clean merges. Never silently overwrite them with older files.
+          is_protected() {
+            local path="$1" item
+            for item in "${protected[@]}"; do
+              if [[ "$path" == "$item" || "$path" == "$item/"* ]]; then return 0; fi
+            done
+            return 1
+          }
           if ! git merge --no-commit --no-ff "$UPSTREAM"; then
+            mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
+            if ! git rev-parse -q --verify MERGE_HEAD >/dev/null || [ "${#conflicts[@]}" -eq 0 ]; then
+              git merge --abort || true
+              echo "上游无法安全合并，保留当前版本" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            for path in "${conflicts[@]}"; do
+              if ! is_protected "$path"; then
+                git merge --abort || true
+                echo "上游核心接口存在冲突，需人工审查：$path" >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+            done
+            # Only fork-owned paths may be resolved to the local implementation.
+            echo "仅自定义文件发生冲突，保留本地扩展并继续测试" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          git restore --source="$BASE" --staged --worktree -- "${protected[@]}"
+          if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
             git merge --abort || true
-            echo "上游代码存在冲突，未自动合并，不阻止本周 Collect" >> "$GITHUB_STEP_SUMMARY"
+            echo "仍存在未解决的合并冲突，保留当前版本" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          # Preserve customized DNS, client and routing templates during safe merges.
-          git restore --source="$BASE" --staged --worktree -- subconverter/base/all_base.tpl subconverter/pref.toml subconverter/snippets/rulesets.toml subconverter/snippets/rulesets_remote.txt
-          # Preserve local runtime contracts, regions, rules and checks against
-          # upstream edits. Conflicts elsewhere abort the merge without pushing.
-          git restore --source="$BASE" --staged --worktree -- \
-            subscribe/collect.py subscribe/profile_layout.py subscribe/singbox_layout.py \
-            subscribe/geo_labels.py subscribe/verified_nodes.py subscribe/surge_provider.py \
-            subscribe/refresh_due.py subscribe/refresh_guard.py subscribe/push.py \
-            subscribe/update_rules.py subscribe/external_rule_sets.py subscribe/verified_public_rules.py \
-            subconverter/rules/auto subconverter/rules/export/singbox \
-            tests/test_rules_updater.py tests/test_external_rule_sets.py tests/test_public_rule_coverage.py \
-            subconverter/rules/custom tests/test_profile_layout.py \
-            tests/test_targeted_routing.py tests/test_clash_oneclick.py \
-            tests/test_profile_defaults.py tests/test_surge_provider.py \
-            tests/test_refresh_guard.py tests/test_gist_retry.py \
-            tests/test_verified_nodes.py tests/test_output_publish.py
-          git restore --source="$BASE" --staged --worktree -- subscribe/output_publish.py
           # A merge touching only protected files has no useful local changes.
           if git diff --cached --quiet; then
             git merge --abort || true
-            echo "上游仅更改受保护模板，已保留 DNS／分流配置" >> "$GITHUB_STEP_SUMMARY"
+            echo "上游仅更改受保护的自定义扩展或模板，保留当前版本" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           if git diff --cached --name-only "$BASE" | grep -Eq '^\.github/workflows/'; then
@@ -85,7 +110,7 @@ jobs:
           fi
           echo "上游安全变更文件：" >> "$GITHUB_STEP_SUMMARY"
           git diff --cached --name-only | sed 's/^/- /' >> "$GITHUB_STEP_SUMMARY"
-          echo "自定义文件已恢复为本地版本；遇到合并冲突或测试失败时不会推送" >> "$GITHUB_STEP_SUMMARY"
+          echo "自定义扩展保留本地版本；共享核心冲突、接口验证或测试失败时不会推送" >> "$GITHUB_STEP_SUMMARY"
           git commit -m "Merge upstream after regression tests"
           git fetch origin main
           if [ "$(git rev-parse origin/main)" != "$BASE" ]; then

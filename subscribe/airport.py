@@ -604,7 +604,8 @@ class AirPort:
                 )
             )
 
-        collected.extend([item for item in source.proxies if isinstance(item, dict)])
+        from extensions.node_dns import clean_nodes
+        collected.extend(clean_nodes([item for item in source.proxies if isinstance(item, dict)]))
         if not collected:
             if source.empty():
                 logger.error(f"[ParseError] cannot found any proxies because node input is empty, domain: {self.ref}")
@@ -775,6 +776,7 @@ class AirPort:
             return proxies if isinstance(proxies, list) else []
 
         text, nodes = utils.trim(text=text), []
+        original_dns_source = text if os.getenv("AGGREGATOR_CAPTURE_NODE_DNS") == "1" else ""
         if not text:
             return []
 
@@ -849,6 +851,9 @@ class AirPort:
 
         if not nodes:
             return []
+        if original_dns_source:
+            from extensions.node_dns import attach_from_source
+            attach_from_source(original_dns_source, nodes)
         if do_verify:
             return [x for x in nodes if verify(x, special)]
         return nodes

@@ -1,18 +1,9 @@
-"""Keep each converted format independent when updating a single Gist."""
-from __future__ import annotations
+"""Compatibility entry point; implementation lives in extensions.output_publish."""
+import importlib
+import runpy
+import sys
 
-
-def publication_groups(targets: list[tuple], records: dict[str, str]) -> list[tuple[str, list[str]]]:
-    """Return per-platform Gist PATCH groups; Surge's two files are atomic."""
-    groups = []
-    for target in targets:
-        filename, target_name = target[1], target[2]
-        if filename not in records:
-            continue
-        filenames = [filename]
-        if target_name == "surge":
-            if "surge-proxy.conf" not in records:
-                continue
-            filenames.append("surge-proxy.conf")
-        groups.append((target_name, filenames))
-    return groups
+if __name__ == "__main__":
+    runpy.run_module("extensions.output_publish", run_name="__main__")
+else:
+    sys.modules[__name__] = importlib.import_module("extensions.output_publish")

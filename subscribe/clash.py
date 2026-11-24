@@ -44,6 +44,10 @@ def generate_config(path: str, proxies: list[dict[str, object]], filename: str) 
     }
 
     config.update(external_config)
+    from extensions.node_dns import apply_mihomo, clean_nodes
+    detected_nodes = config.get("proxies", [])
+    apply_mihomo(config, detected_nodes)
+    config["proxies"] = clean_nodes(detected_nodes)
     with open(os.path.join(path, filename), "w+", encoding="utf8") as f:
         # avoid mihomo error: invalid REALITY short ID see: https://github.com/MetaCubeX/mihomo/blob/Meta/adapter/outbound/reality.go#L35
         yaml.add_representer(QuotedStr, quoted_scalar)
@@ -51,7 +55,7 @@ def generate_config(path: str, proxies: list[dict[str, object]], filename: str) 
         # write to file
         yaml.dump(config, f, allow_unicode=True)
 
-    return config.get("proxies", [])
+    return detected_nodes
 
 
 def filter_proxies(proxies: list[dict[str, object]]) -> dict[str, object]:

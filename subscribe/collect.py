@@ -241,6 +241,8 @@ def aggregate(args: argparse.Namespace) -> None:
     if os.path.exists(generate_conf) and os.path.isfile(generate_conf):
         os.remove(generate_conf)
 
+    if getattr(args, "geo_rename", False):
+        os.environ["AGGREGATOR_CAPTURE_NODE_DNS"] = "1"
     results = pipeline.execute_tasks(tasks) if tasks else []
     proxies = list(itertools.chain.from_iterable([x[1] for x in results if x]))
     fresh_count = len(proxies)
@@ -253,6 +255,8 @@ def aggregate(args: argparse.Namespace) -> None:
         proxies, recovered = merge_candidates(proxies, previous)
         logger.info(f"节点复检：新获取={fresh_count}，历史候选={len(previous)}，额外找回={recovered}，合计={len(proxies)}")
 
+    from extensions.node_dns import mask_credentials
+    mask_credentials(proxies)
     if len(proxies) == 0:
         logger.error("新旧候选均无可检测节点，本轮不更新旧订阅")
         sys.exit(1)
@@ -326,7 +330,9 @@ def aggregate(args: argparse.Namespace) -> None:
         if sub:
             subscriptions.add(sub)
 
-    data = {"proxies": nodes}
+    from extensions.node_dns import clean_nodes, mappings
+    logger.info(f"节点专用 DNS：保留 {len(mappings(nodes))} 个节点服务器域名映射")
+    data = {"proxies": clean_nodes(nodes)}
     urls = list(subscriptions)
     source = "proxies.yaml"
 
@@ -386,6 +392,11 @@ def aggregate(args: argparse.Namespace) -> None:
                 if target_name == 'surge':
                     from external_rule_sets import externalize_surge
                     updated = externalize_surge(updated)
+                    from extensions.node_dns import apply_surge_profile
+                    updated = apply_surge_profile(updated, nodes)
+                elif target_name == 'clash':
+                    from extensions.node_dns import apply_clash_profile
+                    updated = apply_clash_profile(updated, nodes)
                 with open(filepath, "w", encoding="utf-8") as rendered:
                     rendered.write(updated)
 
@@ -420,12 +431,18 @@ def aggregate(args: argparse.Namespace) -> None:
     if 'surge.conf' in records:
         from surge_provider import proxy_lines_only
         try:
+            from extensions.node_dns import surge_dns_module
             with open(records['surge.conf'], 'r', encoding='utf-8') as surge_source:
-                provider_content = proxy_lines_only(surge_source.read())
+                full_surge = surge_source.read()
+            provider_content = proxy_lines_only(full_surge)
+            module_path = os.path.join(DATA_BASE, 'surge-node-dns.sgmodule')
+            with open(module_path, 'w', encoding='utf-8') as module_file:
+                module_file.write(surge_dns_module(full_surge, nodes))
             provider_path = os.path.join(DATA_BASE, 'surge-proxy.conf')
             with open(provider_path, 'w', encoding='utf-8') as provider_file:
                 provider_file.write(provider_content)
             records['surge-proxy.conf'] = provider_path
+            records['surge-node-dns.sgmodule'] = module_path
             logger.info('Surge 外部代理节点列表已生成：surge-proxy.conf')
         except (OSError, ValueError):
             # Keep the last two published Surge artifacts unchanged together.
