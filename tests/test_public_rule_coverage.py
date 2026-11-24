@@ -17,7 +17,7 @@ class RuleCoverageTests(unittest.TestCase):
             'www.bilibili.com':'港台番剧','m.bilibili.com':'港台番剧',
             'api.biliapi.net':'港台番剧','grpc.biliapi.net':'港台番剧',
             'www.netflix.com':'国际媒体','www.youtube.com':'国际媒体',
-            'www.github.com':'GitHub服务','githubusercontent.com':'GitHub服务',
+            'www.github.com':'GitHub','githubusercontent.com':'GitHub',
             'www.microsoft.com':'微软服务','lens.l.google.com':'谷歌服务',
             'api.openai.com':'人工智能','api.ledger.com':'冷钱包',
             'app.adjust.com':'REJECT','www.baidu.com':'DIRECT',
@@ -34,12 +34,12 @@ class RuleCoverageTests(unittest.TestCase):
         names=[g['name'] for g in groups]
         self.assertEqual(names[:6],['节点选择','人工智能','苹果推送','苹果服务','微软服务','谷歌服务'])
         self.assertEqual(groups[0]['icon'],ICON_BASE+'Proxy.png')
-        self.assertEqual(groups[1]['icon'],ICON_BASE+'Bot.png')
+        self.assertEqual(groups[1]['icon'],ICON_BASE+'ChatGPT.png')
         options={g['name']:g['proxies'] for g in groups}
         self.assertEqual(options['人工智能'][0],'日本节点')
         self.assertEqual(options['微软服务'][0],'美国节点')
-        self.assertEqual(options['GitHub服务'][0],'香港节点')
-        self.assertLess(names.index('谷歌服务'),names.index('GitHub服务'))
+        self.assertEqual(options['GitHub'][0],'香港节点')
+        self.assertLess(names.index('谷歌服务'),names.index('GitHub'))
         self.assertLess(names.index('TikTok'),names.index('国际媒体'))
         self.assertNotIn('Google服务',names)
         self.assertNotIn('AI服务',names)

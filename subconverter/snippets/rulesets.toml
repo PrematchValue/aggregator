@@ -42,7 +42,7 @@ group = "国际媒体"
 ruleset = "rules/auto/InternationalMediaFull.list"
 
 [[rulesets]]
-group = "Telegram"
+group = "电报代理"
 ruleset = "rules/custom/Telegram.list"
 
 [[rulesets]]
@@ -54,7 +54,7 @@ group = "谷歌服务"
 ruleset = "rules/custom/Google.list"
 
 [[rulesets]]
-group = "GitHub服务"
+group = "GitHub"
 ruleset = "rules/auto/GitHubService.list"
 
 [[rulesets]]

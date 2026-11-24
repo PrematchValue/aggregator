@@ -29,7 +29,7 @@ class RuleUpdaterTests(unittest.TestCase):
         self.assertNotIn('Google语音',reg)
         self.assertIn('group = "谷歌服务"',reg)
         self.assertNotIn('group = "Google服务"',reg)
-        self.assertLess(reg.index('group = "谷歌服务"'),reg.index('group = "GitHub服务"'))
+        self.assertLess(reg.index('group = "谷歌服务"'),reg.index('group = "GitHub"'))
         self.assertLess(reg.index('group = "TikTok"'),reg.index('group = "国际媒体"'))
     def test_global_source_validates_and_rejects_wrong_origin(self):
         spec=SOURCES[0]
@@ -78,7 +78,7 @@ class RuleUpdaterTests(unittest.TestCase):
         self.assertEqual(groups['人工智能'][0],'日本节点')
         self.assertEqual(groups['TikTok'][0],'日本节点')
         self.assertEqual(groups['微软服务'][0],'美国节点')
-        self.assertEqual(groups['GitHub服务'][0],'香港节点')
+        self.assertEqual(groups['GitHub'][0],'香港节点')
         self.assertIn('谷歌服务',groups)
         self.assertNotIn('Google服务',groups)
         self.assertEqual(groups['漏网之鱼'], ['节点选择','国内直连'])
@@ -93,7 +93,7 @@ class RuleUpdaterTests(unittest.TestCase):
         self.assertEqual(groups['人工智能'][0],'日本节点')
         self.assertEqual(groups['苹果服务'][0],'DIRECT')
         tags=[o['tag'] for o in result['outbounds']]
-        self.assertLess(tags.index('谷歌服务'),tags.index('GitHub服务'))
+        self.assertLess(tags.index('谷歌服务'),tags.index('GitHub'))
         self.assertLess(tags.index('TikTok'),tags.index('国际媒体'))
         self.assertEqual(result['dns']['servers'][0]['detour'],'节点选择')
 

@@ -15,7 +15,7 @@ from urllib.parse import urlsplit, parse_qsl
 import yaml
 
 KEY = '_airport_dns'
-MAX_SOURCE = 4 * 1024 * 1024
+MAX_SOURCE = 15 * 1024 * 1024
 MAX_VALUES = 8
 _LABEL = re.compile(r'^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$')
 
@@ -184,57 +184,86 @@ def _surge_match(pattern, host):
     return re.fullmatch(expr, host) is not None
 
 
-def attach_from_source(text, nodes):
-    """Called before source profile data is discarded; no extra network fetch."""
+def attach_from_source(text, nodes, stats=None):
+    """Extract explicit host-scoped settings; optionally count real parser outcomes."""
+    if stats is None:
+        stats = {}
+    def count(key, amount=1):
+        stats[key] = stats.get(key, 0) + amount
+    count('sources')
     for node in nodes:
         if isinstance(node, dict):
-            node.pop(KEY, None)  # no trust in a source's fabricated metadata
-    if not isinstance(text, str) or len(text) > MAX_SOURCE or not nodes:
-        return nodes
+            node.pop(KEY, None)
+    count('nodes', len(nodes))
+    hosts = [node for node in nodes if isinstance(node, dict) and host_name(node.get('server'))]
+    count('domain_nodes', len(hosts))
+    if not isinstance(text, str) or not text.strip():
+        count('empty'); return nodes
+    if len(text) > MAX_SOURCE:
+        count('oversize'); return nodes
     text = text.lstrip('\ufeff')
     fixed, specific, general, default = {}, {}, {}, None
     surge_rows = None
-    if re.search(r'(?mi)^\s*\[Host\]\s*$', text):
+    if re.search(r'(?mi)^\s*\[(?:Host|Proxy|General)\]\s*$', text):
+        count('surge')
         surge_rows = _surge_entries(text)
+        if re.search(r'(?mi)^\s*\[Host\]\s*$', text):
+            count('host_section')
+        entries = len(surge_rows)
     else:
-        # URI lists/base64 subscriptions have no structured DNS information.
-        if not re.search(r'(?m)^(?:dns|hosts|proxies)\s*:', text):
-            return nodes
+        # Recognize quoted YAML keys and JSON-style Clash profiles as well.
+        structured = re.search(r"(?m)^\s*['\"]?(?:dns|hosts|proxies|proxy-providers)['\"]?\s*:", text)
+        if not structured and not text.lstrip().startswith('{'):
+            count('unstructured'); return nodes
         try:
             doc = yaml.safe_load(text)
         except (yaml.YAMLError, RecursionError, ValueError, TypeError):
-            return nodes
-        if not isinstance(doc, dict):
-            return nodes
+            count('parse_error'); return nodes
+        if not isinstance(doc, dict) or not any(k in doc for k in ('dns', 'hosts', 'proxies', 'proxy-providers')):
+            count('unsupported'); return nodes
+        count('clash')
         dns = doc.get('dns')
+        if isinstance(dns, dict):
+            count('dns_section')
+        if isinstance(doc.get('hosts'), dict):
+            count('host_section')
         if not isinstance(dns, dict):
             dns = {}
-        if dns.get('enable') is False:
-            return nodes
-        fixed = doc.get('hosts', {}) if dns.get('use-hosts') is not False else {}
-        specific = dns.get('proxy-server-nameserver-policy', {})
-        general = dns.get('nameserver-policy', {})
-        # Only an explicitly node-specific default, never the source's generic DNS.
-        default = dns.get('proxy-server-nameserver')
-    for node in nodes:
-        if not isinstance(node, dict) or not (host := host_name(node.get('server'))):
-            continue
+        fixed = doc.get('hosts', {}) if dns.get('use-hosts') is not False and dns.get('enable') is not False else {}
+        if dns.get('enable') is not False:
+            specific = dns.get('proxy-server-nameserver-policy', {})
+            general = dns.get('nameserver-policy', {})
+            default = dns.get('proxy-server-nameserver')
+        else:
+            count('dns_disabled')
+        entries = sum(len(m) for m in (fixed, specific, general) if isinstance(m, dict)) + int(default is not None)
+    count('entries', entries)
+    count('sources_with_entries' if entries else 'sources_without_entries')
+    for node in hosts:
+        host = host_name(node.get('server'))
+        found, h = False, None
         if surge_rows is not None:
             for pattern, kind, values in surge_rows:
                 if _surge_match(pattern, host):
-                    if h := hint(kind, values):
-                        node[KEY] = {'host': host, **h}
+                    found, h = True, hint(kind, values)
                     break
-            continue
-        found, h = _best(fixed, host, 'ip')
-        if not found:
-            found, h = _best(specific, host, 'dns')
-        if not found:
-            found, h = _best(general, host, 'dns')
-        if not found:
-            h = hint('dns', default)
-        if h:
-            node[KEY] = {'host': host, **h}
+        else:
+            found, h = _best(fixed, host, 'ip')
+            if not found:
+                found, h = _best(specific, host, 'dns')
+            if not found:
+                found, h = _best(general, host, 'dns')
+            if not found and default is not None:
+                found, h = True, hint('dns', default)
+        if found:
+            count('matched')
+            if h:
+                node[KEY] = {'host': host, **h}
+                count('attached')
+            else:
+                count('rejected')
+        else:
+            count('unmatched')
     return nodes
 
 
@@ -426,3 +455,130 @@ def surge_dns_module(profile, nodes):
     return ('#!name=Aggregator 节点专用 DNS\n'
             '#!desc=仅匹配当前已发布节点的服务器域名；纯节点订阅的可选配套模块。\n\n'
             '[Host]\n' + ('\n'.join(rows) if rows else '# 本轮没有可公开的节点专用 DNS 映射') + '\n')
+
+
+def _endpoint(node):
+    if not isinstance(node, dict):
+        return None
+    host = host_name(node.get('server'))
+    try:
+        port = int(node.get('port'))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return (host, port) if host and 1 <= port <= 65535 else None
+
+
+def _source_endpoints(text):
+    """Supplementary profiles must explicitly contain the same host and port.
+
+    Never convert or import nodes from the second response. In particular a
+    Host-only module or unrelated profile cannot modify the primary nodes.
+    """
+    if not isinstance(text, str) or not text or len(text) > MAX_SOURCE:
+        return set()
+    text = text.lstrip('\ufeff')
+    if re.search(r'(?mi)^\s*\[Proxy\]\s*$', text):
+        section, endpoints = '', set()
+        for raw in text.splitlines():
+            line = raw.strip()
+            if re.fullmatch(r'\[[^\]]+\]', line):
+                section = line[1:-1].strip().lower()
+                continue
+            if section != 'proxy' or line.startswith(('#', ';', '//')) or '=' not in line:
+                continue
+            parts = line.split('=', 1)[1].split(',', 3)
+            if len(parts) >= 3:
+                item = _endpoint({'server': parts[1].strip().strip('"\''), 'port': parts[2].strip()})
+                if item:
+                    endpoints.add(item)
+        return endpoints
+    try:
+        doc = yaml.safe_load(text)
+    except (yaml.YAMLError, RecursionError, ValueError, TypeError):
+        return set()
+    if not isinstance(doc, dict) or not isinstance(doc.get('proxies'), list):
+        return set()
+    return {ep for n in doc['proxies'] if (ep := _endpoint(n))}
+
+
+def _source_format(stats):
+    for k in ('empty', 'oversize', 'parse_error', 'unsupported', 'surge', 'clash', 'unstructured'):
+        if stats.get(k):
+            return {'empty':'空响应','oversize':'超限','parse_error':'解析失败','unsupported':'不支持','surge':'Surge','clash':'Clash','unstructured':'节点文本/其他'}[k]
+    return '未知'
+
+
+def enrich_subscription(text, nodes, url, fetch, log):
+    """Bounded content-negotiation probes to the same subscription URL.
+
+    The original download and conversion remain the sole node source. Missing
+    hints may be filled from explicit Clash or Surge responses, but only if
+    the response actually includes the corresponding endpoint. Neither source
+    URLs, hosts nor resolver credentials appear in diagnostic output.
+    """
+    primary = {}
+    attach_from_source(text, nodes, primary)
+    initial = primary.get('attached', 0)
+    probes = []
+    try:
+        parsed = urlsplit(url)
+        remote = parsed.scheme in ('http', 'https') and bool(parsed.hostname)
+    except (TypeError, ValueError):
+        remote = False
+    if remote:
+        for ua in ('Clash.Meta', 'Surge'):
+            missing = [n for n in nodes if _endpoint(n) and metadata(n) is None]
+            if not missing:
+                break
+            report = {}
+            try:
+                extra = fetch(url=url, headers={'User-Agent': ua}, retry=1,
+                              timeout=10, trace=False, max_size=MAX_SOURCE)
+            except Exception:
+                extra = ''
+            if not isinstance(extra, str):
+                extra = ''
+            # Identical content has no additional evidence; avoid reparsing it.
+            if extra == text:
+                probes.append(f'{ua}=同原响应')
+                continue
+            # Never attempt to parse arbitrary base64 or other response bodies
+            # as YAML when there is no structured DNS section.
+            if not re.search(r'(?mi)^\s*\[Proxy\]\s*$', extra) and not re.search(r"(?m)^\s*['\"]?proxies['\"]?\s*:", extra) and not extra.lstrip().startswith('{'):
+                probes.append(f'{ua}='+('空响应' if not extra.strip() else '无完整节点配置'))
+                continue
+            endpoints = _source_endpoints(extra)
+            targets = [n for n in missing if _endpoint(n) in endpoints]
+            attach_from_source(extra, targets, report)
+            probes.append(f'{ua}={_source_format(report)}(条目{report.get("entries",0)}/端点匹配{len(targets)}/匹配DNS{report.get("matched",0)}/拒绝{report.get("rejected",0)}/新增{report.get("attached",0)})')
+    total = sum(metadata(n) is not None for n in nodes if isinstance(n, dict))
+    log('DNS采集统计：原始格式='+_source_format(primary)+
+        f'；节点={len(nodes)}；域名节点={primary.get("domain_nodes",0)}；DNS段={primary.get("dns_section",0)}；Host段={primary.get("host_section",0)}；原始DNS/Host条目={primary.get("entries",0)}'
+        f'；匹配={primary.get("matched",0)}；拒绝={primary.get("rejected",0)}；未匹配={primary.get("unmatched",0)}'
+        f'；原始提取={initial}；补取={" | ".join(probes) if probes else "未执行"}；总附加={total}')
+    return nodes
+
+
+def log_stage(label, nodes, log):
+    hints = [metadata(n) for n in nodes if isinstance(n, dict)]
+    hosts = {h['host'] for h in hints if h}
+    accepted = mappings(nodes)
+    log(f'节点专用 DNS [{label}]：节点={len(nodes)}，带映射节点={sum(h is not None for h in hints)}，'
+        f'关联域名={len(hosts)}，可用映射={len(accepted)}，冲突或循环跳过={len(hosts)-len(accepted)}')
+
+
+def log_profile(label, profile, nodes, log):
+    """Count actually rendered, matching entries without exposing any values."""
+    hints = mappings(nodes)
+    if not hints:
+        log(f'节点专用 DNS [{label}]：实际输出=0')
+        return
+    if label == 'Clash':
+        doc = yaml.safe_load(profile)
+        fixed = doc.get('hosts', {})
+        dns = doc.get('dns', {}).get('proxy-server-nameserver-policy', {})
+    else:
+        fixed, dns = _surge_hints(profile)
+    actual = sum(hint(h['kind'], (fixed if h['kind'] == 'ip' else dns).get(host)) ==
+                 {'kind': h['kind'], 'values': h['values']} for host, h in hints.items())
+    log(f'节点专用 DNS [{label}]：实际输出={actual}，未输出={len(hints)-actual}')

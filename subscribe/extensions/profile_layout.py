@@ -11,32 +11,39 @@ import re
 import yaml
 
 ICON_BASE = "https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/"
+LOCAL_ICON_BASE = "https://raw.githubusercontent.com/PrematchValue/aggregator/main/subscribe/extensions/icons/"
 ICONS = {
     "节点选择": "Proxy.png",
     "苹果服务": "Apple.png",
-    "苹果推送": "iCloud.png",
+    "苹果推送": LOCAL_ICON_BASE + "ApplePush.png",
     "谷歌服务": "Google_Search.png",
-    "GitHub服务": "GitHub.png",
+    "GitHub": "GitHub.png",
     "微软服务": "Windows.png",
     "国际媒体": "Streaming.png",
     "港台番剧": "bilibili_3.png",
-    "人工智能": "Bot.png",
+    "人工智能": "ChatGPT.png",
     "TikTok": "TikTok.png",
-    "Telegram": "Telegram.png",
-    "数字资产": "Cryptocurrency_3.png",
-    "冷钱包": "Lock.png",
+    "电报代理": "Telegram.png",
+    "数字资产": LOCAL_ICON_BASE + "Binance.png",
+    "冷钱包": LOCAL_ICON_BASE + "ColdWallet.png",
     "漏网之鱼": "Final.png",
     "香港节点": "Hong_Kong.png",
     "台湾节点": "Taiwan.png",
     "日本节点": "Japan.png",
     "狮城节点": "Singapore.png",
     "美国节点": "United_States.png",
-    "特殊节点": "Available.png",
+    "特殊节点": "Rocket.png",
 }
+
+def icon_url(name: str) -> str:
+    icon = ICONS[name]
+    return icon if icon.startswith("https://") else ICON_BASE + icon
+
+
 SERVICES = (
     "人工智能", "苹果推送", "苹果服务", "微软服务", "谷歌服务",
-    "GitHub服务", "TikTok", "国际媒体", "港台番剧",
-    "Telegram", "数字资产", "冷钱包", "漏网之鱼",
+    "GitHub", "TikTok", "国际媒体", "港台番剧",
+    "电报代理", "数字资产", "冷钱包", "漏网之鱼",
 )
 REGIONS = (
     ("香港节点", "🇭🇰 香港 "),
@@ -79,7 +86,7 @@ def service_choices(name: str, enabled: list[str], direct: str) -> list[str]:
     choices = [*enabled, direct]
     first = {"苹果服务": direct, "港台番剧": direct,
              "人工智能": "日本节点", "TikTok": "日本节点",
-             "GitHub服务": "香港节点", "微软服务": "美国节点"}.get(name)
+             "GitHub": "香港节点", "微软服务": "美国节点"}.get(name)
     if first in choices:
         choices.remove(first)
         choices.insert(0, first)
@@ -89,14 +96,14 @@ def service_choices(name: str, enabled: list[str], direct: str) -> list[str]:
 def groups_for_clash(names: list[str]) -> list[dict]:
     enabled, by_region = build_members(names)
     groups = [{"name": "节点选择", "type": "select", "proxies": enabled,
-               "icon": ICON_BASE + ICONS["节点选择"]}]
+               "icon": icon_url("节点选择")}]
     for name in SERVICES:
         groups.append({"name": name, "type": "select",
                        "proxies": service_choices(name, enabled, "国内直连"),
-                       "icon": ICON_BASE + ICONS[name]})
+                       "icon": icon_url(name)})
     for name in enabled:
         group = {"name": name, "type": "select", "proxies": by_region[name],
-                 "icon": ICON_BASE + ICONS[name]}
+                 "icon": icon_url(name)}
         if name != SPECIAL:
             group.update(type="url-test", url="https://www.gstatic.com/generate_204",
                          interval=600, tolerance=50, lazy=True)
@@ -204,7 +211,7 @@ def _surge_layout(text: str) -> str:
         if matched:
             names.append(matched.group(1).strip())
     enabled, _ = build_members(names)
-    icon = lambda name: f"icon-url={ICON_BASE}{ICONS[name]}"
+    icon = lambda name: f"icon-url={icon_url(name)}"
     group_lines = ["[Proxy Group]",
                    "节点选择 = select, " + ", ".join([*enabled, icon("节点选择")])]
     group_lines.extend(

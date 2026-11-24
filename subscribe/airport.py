@@ -589,6 +589,7 @@ class AirPort:
                     ignore=ignore_exclude,
                     special=special_protocols,
                     do_verify=False,
+                    source_url=url,
                 )
             )
 
@@ -725,6 +726,7 @@ class AirPort:
         throw: bool = False,
         use_subconverter: bool = True,
         do_verify: bool = True,
+        source_url: str = "",
     ) -> list[dict[str, object]]:
         def clean_text(document: str) -> str:
             document = utils.trim(text=document)
@@ -852,8 +854,8 @@ class AirPort:
         if not nodes:
             return []
         if original_dns_source:
-            from extensions.node_dns import attach_from_source
-            attach_from_source(original_dns_source, nodes)
+            from extensions.node_dns import enrich_subscription
+            enrich_subscription(original_dns_source, nodes, source_url, utils.http_get, logger.info)
         if do_verify:
             return [x for x in nodes if verify(x, special)]
         return nodes

@@ -246,7 +246,9 @@ def aggregate(args: argparse.Namespace) -> None:
     results = pipeline.execute_tasks(tasks) if tasks else []
     proxies = list(itertools.chain.from_iterable([x[1] for x in results if x]))
     fresh_count = len(proxies)
+    from extensions.node_dns import log_stage
     if getattr(args, "geo_rename", False):
+        log_stage("采集后", proxies, logger.info)
         try:
             previous = load_verified_nodes(gist_id, access_token)
         except Exception as exc:
@@ -257,6 +259,8 @@ def aggregate(args: argparse.Namespace) -> None:
 
     from extensions.node_dns import mask_credentials
     mask_credentials(proxies)
+    if getattr(args, "geo_rename", False):
+        log_stage("历史合并与去重后", proxies, logger.info)
     if len(proxies) == 0:
         logger.error("新旧候选均无可检测节点，本轮不更新旧订阅")
         sys.exit(1)
@@ -308,6 +312,9 @@ def aggregate(args: argparse.Namespace) -> None:
             logger.error("所有新旧节点均未通过连通检测，保留 Gist 上一轮结果")
             sys.exit(1)
 
+    if getattr(args, "geo_rename", False):
+        log_stage("连通性检测后", nodes, logger.info)
+
     # Presentation extension only: reuse upstream's Mihomo location engine.
     # All discovery, liveness, parsing and conversion are upstream code.
     if getattr(args, "geo_rename", False):
@@ -331,6 +338,7 @@ def aggregate(args: argparse.Namespace) -> None:
             subscriptions.add(sub)
 
     from extensions.node_dns import clean_nodes, mappings
+    log_stage("出口地区确认后", nodes, logger.info)
     logger.info(f"节点专用 DNS：保留 {len(mappings(nodes))} 个节点服务器域名映射")
     data = {"proxies": clean_nodes(nodes)}
     urls = list(subscriptions)
@@ -394,9 +402,12 @@ def aggregate(args: argparse.Namespace) -> None:
                     updated = externalize_surge(updated)
                     from extensions.node_dns import apply_surge_profile
                     updated = apply_surge_profile(updated, nodes)
+                    from extensions.node_dns import log_profile
+                    log_profile("Surge", updated, nodes, logger.info)
                 elif target_name == 'clash':
-                    from extensions.node_dns import apply_clash_profile
+                    from extensions.node_dns import apply_clash_profile, log_profile
                     updated = apply_clash_profile(updated, nodes)
+                    log_profile("Clash", updated, nodes, logger.info)
                 with open(filepath, "w", encoding="utf-8") as rendered:
                     rendered.write(updated)
 

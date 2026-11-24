@@ -226,4 +226,148 @@ dns:
         refresh=(ROOT/'.github/workflows/refresh.yaml').read_text('utf-8')
         self.assertIn('AGGREGATOR_ALLOW_TOKENIZED_DNS: ${{ vars.AGGREGATOR_ALLOW_TOKENIZED_DNS }}',refresh)
 
+class SourceDNSDiagnosticsTests(unittest.TestCase):
+    def test_primary_counts_match_reject_and_unmatched(self):
+        source = '''proxies: []
+dns:
+  nameserver: [8.8.8.8]
+  proxy-server-nameserver-policy:
+    edge.airport.example: 1.1.1.1
+    bad.example: 127.0.0.1
+'''
+        ns = [node(), node('B', 'bad.example'), node('C','unmatched.example'), node('D','1.0.0.1')]
+        stats = {}
+        nd.attach_from_source(source, ns, stats)
+        self.assertEqual({k:stats[k] for k in ('entries','domain_nodes','matched','attached','rejected','unmatched')},
+                         {'entries':2,'domain_nodes':3,'matched':2,'attached':1,'rejected':1,'unmatched':1})
+        self.assertEqual(nd.metadata(ns[0])['values'],['1.1.1.1'])
+
+    def test_quoted_yaml_and_json_source(self):
+        ns = [node()]
+        stats = {}
+        nd.attach_from_source('"dns": {"proxy-server-nameserver-policy": {"edge.airport.example": "1.1.1.1"}}',ns,stats)
+        self.assertEqual(stats['attached'],1)
+        nd.attach_from_source('{"dns":{"proxy-server-nameserver-policy":{"edge.airport.example":"9.9.9.9"}}}',ns,{})
+        self.assertEqual(nd.metadata(ns[0])['values'],['9.9.9.9'])
+
+    def test_supplemental_profiles_require_same_endpoint_and_do_not_replace_primary(self):
+        ns=[node(), node('B','tw.airport.example'),node('C','jp.airport.example'),node('D','other.example')]
+        original='''proxies: []
+dns:
+  proxy-server-nameserver-policy:
+    edge.airport.example: 1.1.1.1
+'''
+        clash='''proxies:
+  - {name: C, server: tw.airport.example, port: 443}
+  - {name: D, server: jp.airport.example, port: 444}
+  - {name: E, server: edge.airport.example, port: 443}
+dns:
+  proxy-server-nameserver-policy:
+    '+.airport.example': 9.9.9.9
+'''
+        surge='''[Proxy]
+A = trojan, jp.airport.example, 443, password=x
+[Host]
+*.airport.example = server:https://dns.example/dns-query?key=secret_token_123
+other.example = server:8.8.8.8
+'''
+        from unittest.mock import Mock
+        fetch=Mock(side_effect=[clash,surge]); logs=[]
+        with patch.dict(os.environ,{'AGGREGATOR_ALLOW_TOKENIZED_DNS':'true'}):
+            nd.enrich_subscription(original,ns,'https://airport.example/sub?token=private',fetch,logs.append)
+            self.assertEqual(nd.metadata(ns[0])['values'],['1.1.1.1'])
+            self.assertEqual(nd.metadata(ns[1])['values'],['9.9.9.9'])
+            self.assertEqual(nd.metadata(ns[2])['values'],['https://dns.example/dns-query?key=secret_token_123'])
+            self.assertIsNone(nd.metadata(ns[3]))
+        self.assertEqual(fetch.call_count,2)
+        self.assertEqual([c.kwargs['headers']['User-Agent'] for c in fetch.call_args_list],['Clash.Meta','Surge'])
+        self.assertTrue(all(c.kwargs['url']=='https://airport.example/sub?token=private' and c.kwargs['retry']==1 and c.kwargs['trace'] is False for c in fetch.call_args_list))
+        self.assertIn('总附加=3',logs[0]); self.assertNotIn('secret_token',logs[0]);self.assertNotIn('private',logs[0]);self.assertNotIn('airport.example',logs[0])
+
+    def test_already_mapped_and_ip_nodes_do_not_probe(self):
+        from unittest.mock import Mock
+        fetch=Mock();logs=[]
+        nd.enrich_subscription('[Host]\nedge.airport.example = server:1.1.1.1',[node(),node('B','8.8.8.8')], 'https://airport.example/sub',fetch,logs.append)
+        fetch.assert_not_called();self.assertIn('补取=未执行',logs[0])
+
+    def test_identical_and_failed_responses_counted_without_losing_nodes(self):
+        from unittest.mock import Mock
+        ns=[node()];logs=[]
+        fetch=Mock(side_effect=['ss://sample',TimeoutError()])
+        nd.enrich_subscription('ss://sample',ns,'https://airport.example/sub',fetch,logs.append)
+        self.assertIsNone(nd.metadata(ns[0]));self.assertEqual(len(ns),1)
+        self.assertIn('Clash.Meta=同原响应',logs[0]);self.assertIn('Surge=空响应',logs[0])
+
+    def test_stage_diagnostics_counts_conflicts(self):
+        logs=[]
+        nd.log_stage('测试',[with_hint(node(),'1.1.1.1'),with_hint(node('B'),'9.9.9.9')],logs.append)
+        self.assertIn('带映射节点=2',logs[0]);self.assertIn('可用映射=0',logs[0]);self.assertIn('冲突或循环跳过=1',logs[0]);self.assertNotIn('1.1.1.1',logs[0])
+
+
+    def test_profile_diagnostics_counts_only_rendered_entries(self):
+        a=with_hint(node(),'1.1.1.1'); b=with_hint(node('B','other.example'),'9.9.9.9')
+        logs=[]
+        nd.log_profile('Clash', 'dns:\n  proxy-server-nameserver-policy:\n    edge.airport.example: [1.1.1.1]\n', [a,b],logs.append)
+        nd.log_profile('Surge', '[Host]\nedge.airport.example = server:1.1.1.1\n', [a,b],logs.append)
+        self.assertTrue(all('实际输出=1，未输出=1' in l for l in logs))
+        self.assertTrue(all('1.1.1.1' not in l for l in logs))
+
+
+class SourceDNSWiringAndIconTests(unittest.TestCase):
+    def test_decode_calls_supplementary_fetch_only_in_capture_mode(self):
+        from airport import AirPort
+        raw='''proxies:
+  - {name: A, type: trojan, server: edge.airport.example, port: 443, password: dummy}
+'''
+        full=raw+'dns:\n  proxy-server-nameserver-policy:\n    edge.airport.example: 1.1.1.1\n'
+        with patch.dict(os.environ,{'AGGREGATOR_CAPTURE_NODE_DNS':'1'}), patch('airport.utils.http_get',return_value=full) as fetch:
+            ns=AirPort.decode(raw,'',use_subconverter=False,do_verify=False,source_url='https://airport.example/sub')
+            self.assertEqual(nd.metadata(ns[0])['values'],['1.1.1.1']);fetch.assert_called_once()
+        with patch.dict(os.environ,{'AGGREGATOR_CAPTURE_NODE_DNS':'0'}), patch('airport.utils.http_get') as fetch:
+            ns=AirPort.decode(raw,'',use_subconverter=False,do_verify=False,source_url='https://airport.example/sub')
+            self.assertIsNone(nd.metadata(ns[0]));fetch.assert_not_called()
+
+    def test_weekly_protection_and_core_contract(self):
+        airport=(ROOT/'subscribe/airport.py').read_text('utf-8')
+        self.assertIn('source_url=url,',airport)
+        self.assertIn('enrich_subscription(original_dns_source, nodes, source_url, utils.http_get, logger.info)',airport)
+        collector=(ROOT/'subscribe/collect.py').read_text('utf-8')
+        for label in ('采集后','历史合并与去重后','连通性检测后','出口地区确认后'):
+            self.assertIn(f'log_stage("{label}"',collector)
+        weekly=(ROOT/'.github/workflows/collect.yaml').read_text('utf-8')
+        self.assertIn('subscribe/extensions',weekly);self.assertIn('tests/test_extension_dns.py',weekly)
+        self.assertIn('python -m unittest discover -s tests -q',weekly)
+        self.assertIn('git merge --abort',weekly)
+
+    def test_five_icon_urls_and_preserved_group_behavior(self):
+        from profile_layout import groups_for_clash, icon_url, apply_profile_layout
+        from struct import unpack
+        expected={'人工智能':'ChatGPT.png','苹果推送':'ApplePush.png','数字资产':'Binance.png','冷钱包':'ColdWallet.png','特殊节点':'Rocket.png'}
+        names=['🇭🇰 香港 001','🇹🇼 台湾 001','🇯🇵 日本 001','🇰🇷 韩国 001']
+        groups={g['name']:g for g in groups_for_clash(names)}
+        for name,file in expected.items():
+            self.assertTrue(icon_url(name).endswith('/'+file));self.assertEqual(groups[name]['icon'],icon_url(name))
+        self.assertNotEqual(icon_url('苹果推送'),icon_url('苹果服务'))
+        self.assertEqual(icon_url('国际媒体'), 'https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Streaming.png')
+        self.assertIn('电报代理',groups); self.assertIn('GitHub',groups)
+        self.assertNotIn('Telegram',groups); self.assertNotIn('GitHub服务',groups)
+        self.assertEqual(groups['GitHub']['proxies'][0],'香港节点')
+        import tomllib
+        reg=tomllib.loads((ROOT/'subconverter/snippets/rulesets.toml').read_text('utf-8'))
+        self.assertIn('group = "电报代理"',(ROOT/'subconverter/snippets/rulesets.toml').read_text('utf-8'))
+        self.assertIn('group = "GitHub"',(ROOT/'subconverter/snippets/rulesets.toml').read_text('utf-8'))
+        self.assertEqual(groups['特殊节点']['type'],'select')
+        self.assertEqual(groups['台湾节点']['type'],'url-test');self.assertEqual(groups['台湾节点']['interval'],600);self.assertTrue(groups['台湾节点']['lazy'])
+        self.assertEqual(groups['人工智能']['proxies'][0],'日本节点')
+        self.assertEqual(groups['港台番剧']['proxies'][0],'国内直连')
+        for f in ('ApplePush.png','Binance.png','ColdWallet.png'):
+            data=(ROOT/'subscribe/extensions/icons'/f).read_bytes()
+            self.assertEqual(data[:8],b'\x89PNG\r\n\x1a\n'); self.assertEqual(unpack('>II',data[16:24]),(128,128));self.assertEqual(data[25],6)
+        surge='[General]\n[Proxy]\n'+'\n'.join(n+' = trojan, edge.airport.example, 443, password=dummy' for n in names)+'\n[Rule]\nFINAL,DIRECT\n'
+        result=apply_profile_layout(surge,'surge')
+        for name in expected: self.assertIn('icon-url='+icon_url(name),result)
+        self.assertIn('电报代理 = select,',result);self.assertIn('GitHub = select,',result)
+        self.assertIn('特殊节点 = select,',result);self.assertIn('台湾节点 = smart,',result)
+
+
 if __name__=='__main__': unittest.main()

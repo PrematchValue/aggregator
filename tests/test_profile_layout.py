@@ -49,7 +49,7 @@ class PolicyLayoutTests(unittest.TestCase):
         self.assertNotIn("DIRECT", groups["人工智能"]["proxies"])
         self.assertNotIn("国内直连", groups["节点选择"]["proxies"])
         self.assertTrue(groups["谷歌服务"]["icon"].endswith("/Google_Search.png"))
-        self.assertLess(list(groups).index("谷歌服务"), list(groups).index("GitHub服务"))
+        self.assertLess(list(groups).index("谷歌服务"), list(groups).index("GitHub"))
         self.assertLess(list(groups).index("TikTok"), list(groups).index("国际媒体"))
         for region in ("香港节点", "台湾节点", "日本节点", "狮城节点", "美国节点"):
             self.assertEqual(groups[region]["type"], "url-test")
@@ -89,7 +89,7 @@ class PolicyLayoutTests(unittest.TestCase):
         self.assertIn("国内直连$", result)
         self.assertIn("香港节点 = smart, include-all-proxies=true, policy-regex-filter=^🇭🇰", result)
         self.assertEqual(result.count("icon-url="), len(ICONS))
-        self.assertLess(result.index("\n谷歌服务 = select"), result.index("\nGitHub服务 = select"))
+        self.assertLess(result.index("\n谷歌服务 = select"), result.index("\nGitHub = select"))
         self.assertLess(result.index("\nTikTok = select"), result.index("\n国际媒体 = select"))
         self.assertNotIn("全球直连", result)
         self.assertIn("🇭🇰 香港 001 = ss,", result)
