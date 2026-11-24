@@ -199,6 +199,49 @@ dns:
             nodes=AirPort.decode(source,'',use_subconverter=False,do_verify=False)
         self.assertNotIn(nd.KEY,nodes[0])
 
+    def test_refresh_detection_dns_matches_client_template(self):
+        from clash import generate_config
+        from location import generate_mihomo_config
+        from test_clash_oneclick import simplified_clash_template
+        expected = simplified_clash_template()["dns"]
+        ordinary = node('A', 'ordinary.example')
+        special = with_hint(node('B', 'special.example'), '1.1.1.1')
+        fixed = with_hint(node('C', 'fixed.example'), '8.8.8.8', kind='ip')
+        with patch.dict(os.environ, {'AGGREGATOR_CAPTURE_NODE_DNS': '1'}):
+            for sample in ([ordinary], [ordinary, special, fixed]):
+                with tempfile.TemporaryDirectory() as d:
+                    result = generate_config(d, [dict(n) for n in sample], 'test.yaml')
+                    live = yaml.safe_load((Path(d) / 'test.yaml').read_text('utf-8'))
+                geo, _ = generate_mihomo_config([dict(n) for n in sample],
+                                               [18081, 18082, 18083], 18080)
+                for config in (live, geo):
+                    dns = config['dns']
+                    self.assertTrue(dns['enable'])
+                    for key in ('default-nameserver', 'proxy-server-nameserver'):
+                        self.assertEqual(dns[key], expected[key])
+                    self.assertTrue(all(nd.KEY not in n for n in config['proxies']))
+                    if len(sample) == 3:
+                        self.assertEqual(dns['proxy-server-nameserver-policy'],
+                                         {'special.example': ['1.1.1.1']})
+                        self.assertEqual(config['hosts'], {'fixed.example': ['8.8.8.8']})
+                        self.assertEqual(len(nd.mappings(result)), 2)
+                    else:
+                        self.assertNotIn('proxy-server-nameserver-policy', dns)
+                        self.assertNotIn('hosts', config)
+                self.assertEqual(live['dns']['nameserver'], ['system'])
+                self.assertEqual(geo['dns']['nameserver'], ['114.114.114.114', '8.8.8.8'])
+
+    def test_detection_dns_outside_refresh_is_unchanged(self):
+        with patch.dict(os.environ, {'AGGREGATOR_CAPTURE_NODE_DNS': '0'}):
+            config = {'dns': {'nameserver': ['8.8.8.8']}}
+            nd.apply_detection_dns(config, [node()])
+            self.assertEqual(config, {'dns': {'nameserver': ['8.8.8.8']}})
+            a = with_hint(node(), '1.1.1.1')
+            expected = {'dns': {'nameserver': ['8.8.8.8']}}
+            nd.apply_mihomo(expected, [a])
+            nd.apply_detection_dns(config, [a])
+            self.assertEqual(config, expected)
+
     def test_liveness_and_geo_actual_configuration(self):
         from clash import generate_config
         from location import generate_mihomo_config

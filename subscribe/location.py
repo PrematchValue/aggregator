@@ -557,8 +557,8 @@ def generate_mihomo_config(proxies: list[dict], listener_ports: list[int], mixed
         "listeners": [],
     }
 
-    from extensions.node_dns import apply_mihomo, clean_nodes
-    apply_mihomo(config, proxies)
+    from extensions.node_dns import apply_detection_dns, clean_nodes
+    apply_detection_dns(config, proxies)
     config["proxies"] = clean_nodes(proxies)
 
     records = dict()

@@ -38,6 +38,8 @@ dns:
   proxy-server-nameserver:
     - https://dns.alidns.com/dns-query
     - https://doh.pub/dns-query
+    - https://doh-pure.onedns.net/dns-query
+    - https://doh.360.cn/dns-query
   direct-nameserver:
     - https://dns.alidns.com/dns-query
     - https://doh.pub/dns-query
