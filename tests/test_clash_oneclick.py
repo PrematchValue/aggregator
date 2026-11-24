@@ -35,7 +35,16 @@ class ClashOneClickTests(unittest.TestCase):
         self.assertEqual(dns["enhanced-mode"], "fake-ip")
         self.assertEqual(dns["listen"], "127.0.0.1:1053")
         self.assertIn("geosite:cn,private", dns["nameserver-policy"])
-        self.assertEqual(len(dns["proxy-server-nameserver"]), 2)
+        self.assertEqual(dns["proxy-server-nameserver"], [
+            "https://dns.alidns.com/dns-query", "https://doh.pub/dns-query",
+        ])
+        self.assertEqual(dns["default-nameserver"], ["223.5.5.5", "119.29.29.29"])
+        self.assertEqual(dns["direct-nameserver"], [
+            "https://dns.alidns.com/dns-query", "https://doh.pub/dns-query",
+        ])
+        self.assertEqual(dns["nameserver"], [
+            "https://1.1.1.1/dns-query#节点选择", "https://8.8.8.8/dns-query#节点选择",
+        ])
         self.assertTrue(all("#节点选择" in x for x in dns["nameserver"]))
         self.assertIn("+.lan", dns["fake-ip-filter"])
         self.assertIn("captive.apple.com", dns["fake-ip-filter"])

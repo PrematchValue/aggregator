@@ -36,8 +36,8 @@ dns:
     - 223.5.5.5
     - 119.29.29.29
   proxy-server-nameserver:
-    - 223.5.5.5
-    - 119.29.29.29
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
   direct-nameserver:
     - https://dns.alidns.com/dns-query
     - https://doh.pub/dns-query
