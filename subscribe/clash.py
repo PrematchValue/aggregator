@@ -44,9 +44,9 @@ def generate_config(path: str, proxies: list[dict[str, object]], filename: str) 
     }
 
     config.update(external_config)
-    from extensions.node_dns import apply_detection_dns, clean_nodes
+    from extensions.node_dns import clean_nodes
     detected_nodes = config.get("proxies", [])
-    apply_detection_dns(config, detected_nodes)
+    # DNS hints are output metadata only; never change upstream detection settings.
     config["proxies"] = clean_nodes(detected_nodes)
     with open(os.path.join(path, filename), "w+", encoding="utf8") as f:
         # avoid mihomo error: invalid REALITY short ID see: https://github.com/MetaCubeX/mihomo/blob/Meta/adapter/outbound/reality.go#L35

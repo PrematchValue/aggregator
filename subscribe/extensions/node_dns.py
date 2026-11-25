@@ -9,7 +9,6 @@ from __future__ import annotations
 import ipaddress
 import os
 import re
-import socket
 from collections import defaultdict
 from urllib.parse import urlsplit, parse_qsl
 
@@ -388,55 +387,8 @@ def mask_credentials(nodes):
         print('::add-mask::' + escaped, flush=True)
 
 
-# Keep the Refresh detection resolver in sync with the published Clash template.
-# The regression test compares both generated configurations with the template.
-NODE_DNS_BOOTSTRAP = ("223.5.5.5", "119.29.29.29")
-NODE_DNS_RESOLVERS = (
-    "https://dns.alidns.com/dns-query",
-    "https://doh.pub/dns-query",
-    "https://doh-pure.onedns.net/dns-query",
-    "https://doh.360.cn/dns-query",
-)
-
-
-def configure_runner_ipv6(log):
-    """Detect usable outbound IPv6 once per Refresh; never force IPv6-only."""
-    available = False
-    for target in ("2606:4700:4700::1111", "2001:4860:4860::8888"):
-        try:
-            with socket.create_connection((target, 443), timeout=2):
-                available = True
-                break
-        except OSError:
-            continue
-    os.environ["AGGREGATOR_RUNNER_IPV6"] = "1" if available else "0"
-    log("采集端 IPv6：" + ("公网 TCP 探测成功，启用双栈" if available else "公网 TCP 探测未通过，保留 IPv4"))
-    return available
-
-
-def apply_detection_dns(config, nodes):
-    """Refresh-only node DNS defaults; keep the existing ordinary DNS path."""
-    if os.getenv("AGGREGATOR_CAPTURE_NODE_DNS") == "1":
-        dns = config.setdefault("dns", {})
-        if not isinstance(dns, dict):
-            raise ValueError("invalid Mihomo DNS section")
-        dns["enable"] = True
-        ipv6 = os.getenv("AGGREGATOR_RUNNER_IPV6") == "1"
-        config["ipv6"] = ipv6
-        config["tcp-concurrent"] = True
-        dns["ipv6"] = ipv6
-        dns.setdefault("enhanced-mode", "redir-host")
-        # Liveness previously used system DNS for ordinary lookups; location
-        # already has its own nameserver list. Leave either behavior intact.
-        dns.setdefault("nameserver", ["system"])
-        dns["default-nameserver"] = list(NODE_DNS_BOOTSTRAP)
-        dns["proxy-server-nameserver"] = list(NODE_DNS_RESOLVERS)
-    # Retain existing exact-host DNS and fixed Host mappings, including tokens.
-    return apply_mihomo(config, nodes)
-
-
 def apply_mihomo(config, nodes):
-    """Extend only node-specific entries. Ordinary configurations are untouched."""
+    """Add node-specific DNS/Hosts to a client output profile only."""
     hints = mappings(nodes)
     if not hints:
         return config

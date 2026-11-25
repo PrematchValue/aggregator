@@ -200,63 +200,48 @@ dns:
             nodes=AirPort.decode(source,'',use_subconverter=False,do_verify=False)
         self.assertNotIn(nd.KEY,nodes[0])
 
-    def test_refresh_detection_dns_matches_client_template(self):
+    def test_detection_ignores_client_dns_and_hosts_metadata(self):
         from clash import generate_config
         from location import generate_mihomo_config
-        from test_clash_oneclick import simplified_clash_template
-        expected = simplified_clash_template()["dns"]
-        ordinary = node('A', 'ordinary.example')
-        special = with_hint(node('B', 'special.example'), 'https://resolver-a.example/dns-query')
-        fixed = with_hint(node('C', 'fixed.example'), '8.8.8.8', kind='ip')
-        with patch.dict(os.environ, {'AGGREGATOR_CAPTURE_NODE_DNS': '1', 'AGGREGATOR_RUNNER_IPV6': '0'}):
-            for sample in ([ordinary], [ordinary, special, fixed]):
+        plain = [node('A', 'ordinary.example'), node('B', 'special.example'),
+                 node('C', 'fixed.example')]
+        annotated = [dict(plain[0]),
+                     with_hint(dict(plain[1]), 'https://resolver-a.example/dns-query'),
+                     with_hint(dict(plain[2]), '8.8.8.8', kind='ip')]
+        # Capturing client metadata must not change either native test config.
+        for capture in ('0', '1'):
+            with patch.dict(os.environ, {'AGGREGATOR_CAPTURE_NODE_DNS': capture}):
                 with tempfile.TemporaryDirectory() as d:
-                    result = generate_config(d, [dict(n) for n in sample], 'test.yaml')
-                    live = yaml.safe_load((Path(d) / 'test.yaml').read_text('utf-8'))
-                geo, _ = generate_mihomo_config([dict(n) for n in sample],
-                                               [18081, 18082, 18083], 18080)
-                for config in (live, geo):
-                    dns = config['dns']
-                    self.assertTrue(dns['enable'])
-                    self.assertFalse(config['ipv6']); self.assertFalse(dns['ipv6'])
-                    self.assertTrue(config['tcp-concurrent'])
-                    for key in ('default-nameserver', 'proxy-server-nameserver'):
-                        self.assertEqual(dns[key], expected[key])
-                    self.assertTrue(all(nd.KEY not in n for n in config['proxies']))
-                    if len(sample) == 3:
-                        self.assertEqual(dns['proxy-server-nameserver-policy'],
-                                         {'special.example': ['https://resolver-a.example/dns-query']})
-                        self.assertEqual(config['hosts'], {'fixed.example': ['8.8.8.8']})
-                        self.assertEqual(len(nd.mappings(result)), 2)
-                    else:
-                        self.assertNotIn('proxy-server-nameserver-policy', dns)
-                        self.assertNotIn('hosts', config)
-                self.assertEqual(live['dns']['nameserver'], ['system'])
-                self.assertEqual(geo['dns']['nameserver'], ['114.114.114.114', '8.8.8.8'])
-
-    def test_detection_dns_outside_refresh_is_unchanged(self):
-        with patch.dict(os.environ, {'AGGREGATOR_CAPTURE_NODE_DNS': '0'}):
-            config = {'dns': {'nameserver': ['8.8.8.8']}}
-            nd.apply_detection_dns(config, [node()])
-            self.assertEqual(config, {'dns': {'nameserver': ['8.8.8.8']}})
-            a = with_hint(node(), 'https://resolver-a.example/dns-query')
-            expected = {'dns': {'nameserver': ['8.8.8.8']}}
-            nd.apply_mihomo(expected, [a])
-            nd.apply_detection_dns(config, [a])
-            self.assertEqual(config, expected)
-
-    def test_liveness_and_geo_actual_configuration(self):
-        from clash import generate_config
-        from location import generate_mihomo_config
-        a=with_hint(node(),'https://resolver-a.example/dns-query')
-        with tempfile.TemporaryDirectory() as d:
-            result=generate_config(d,[a], 'test.yaml')
-            doc=yaml.safe_load((Path(d)/'test.yaml').read_text('utf-8'))
-            self.assertEqual(doc['dns']['proxy-server-nameserver-policy'],{'edge.airport.example':['https://resolver-a.example/dns-query']})
-            self.assertNotIn(nd.KEY,doc['proxies'][0]);self.assertIn(nd.KEY,result[0])
-        cfg,records=generate_mihomo_config([a],[18081],18080)
-        self.assertEqual(cfg['dns']['proxy-server-nameserver-policy'],{'edge.airport.example':['https://resolver-a.example/dns-query']})
-        self.assertNotIn(nd.KEY,cfg['proxies'][0]);self.assertEqual(records[a['name']],18081)
+                    generate_config(d, [dict(n) for n in plain], 'plain.yaml')
+                    result = generate_config(d, [dict(n) for n in annotated], 'annotated.yaml')
+                    expected = yaml.safe_load((Path(d) / 'plain.yaml').read_text('utf-8'))
+                    actual = yaml.safe_load((Path(d) / 'annotated.yaml').read_text('utf-8'))
+                # Upstream filter_proxies deliberately shuffles nodes three times
+                # and builds group membership from a set. Compare content, not order.
+                for config in (actual, expected):
+                    config['proxies'].sort(key=lambda proxy: proxy['name'])
+                    for group in config['proxy-groups']:
+                        group['proxies'].sort()
+                self.assertEqual(actual, expected)
+                for key in ('dns', 'hosts', 'ipv6', 'tcp-concurrent'):
+                    self.assertNotIn(key, actual)
+                self.assertEqual(len(nd.mappings(result)), 2)
+                self.assertTrue(all(nd.KEY not in n for n in actual['proxies']))
+                geo_plain, expected_records = generate_mihomo_config(
+                    [dict(n) for n in plain], [18081, 18082, 18083], 18080)
+                geo, records = generate_mihomo_config(
+                    [dict(n) for n in annotated], [18081, 18082, 18083], 18080)
+                self.assertEqual(geo, geo_plain)
+                self.assertEqual(records, expected_records)
+                self.assertFalse(geo['ipv6'])
+                self.assertTrue(geo['tcp-concurrent'])  # Native upstream default.
+                self.assertEqual(geo['dns'], {
+                    'enable': True, 'ipv6': False, 'enhanced-mode': 'redir-host',
+                    'default-nameserver': ['114.114.114.114', '223.5.5.5', '8.8.8.8'],
+                    'nameserver': ['114.114.114.114', '8.8.8.8'],
+                })
+                self.assertNotIn('hosts', geo)
+                self.assertTrue(all(nd.KEY not in n for n in geo['proxies']))
 
     def test_merge_contract_wiring(self):
         collect=(ROOT/'subscribe/collect.py').read_text('utf-8')
@@ -450,10 +435,11 @@ class StrictDoHAndIPv6Tests(unittest.TestCase):
             self.assertNotIn(nd.KEY, json.loads(snapshot_content(fresh))['nodes'][0])
             fresh, _ = merge_candidates([node()], [with_hint(node(),special)])
             self.assertEqual(nd.metadata(fresh[0])['values'], [special])
-            cfg = {'dns': {'proxy-server-nameserver': list(nd.NODE_DNS_RESOLVERS)}}
+            client_resolvers = ['https://dns.alidns.com/dns-query', 'https://doh.pub/dns-query']
+            cfg = {'dns': {'proxy-server-nameserver': client_resolvers.copy()}}
             nd.apply_mihomo(cfg, fresh)
             self.assertEqual(cfg['dns']['proxy-server-nameserver-policy'], {'edge.airport.example':[special]})
-            self.assertEqual(cfg['dns']['proxy-server-nameserver'], list(nd.NODE_DNS_RESOLVERS))
+            self.assertEqual(cfg['dns']['proxy-server-nameserver'], client_resolvers)
             surge = '[Proxy]\n台湾 001 = trojan, edge.airport.example, 443, password=dummy\n'
             self.assertIn('server:'+special, nd.apply_surge_profile(surge, fresh))
 
@@ -466,33 +452,6 @@ class StrictDoHAndIPv6Tests(unittest.TestCase):
         nd.enrich_subscription(primary, nodes, 'https://airport.example/sub', fetch, lambda _: None)
         self.assertEqual(nd.metadata(nodes[0])['values'], ['https://resolver-a.example/dns-query'])
         fetch.assert_called_once()
-
-    def test_runner_ipv6_probe_success_and_failure(self):
-        from unittest.mock import MagicMock
-        with patch.dict(os.environ, {}, clear=False):
-            with patch.object(nd.socket, 'create_connection', side_effect=[OSError(), MagicMock()]) as connect:
-                self.assertTrue(nd.configure_runner_ipv6(lambda _: None))
-                self.assertEqual(os.environ['AGGREGATOR_RUNNER_IPV6'], '1'); self.assertEqual(connect.call_count, 2)
-            with patch.object(nd.socket, 'create_connection', side_effect=OSError()) as connect:
-                self.assertFalse(nd.configure_runner_ipv6(lambda _: None))
-                self.assertEqual(os.environ['AGGREGATOR_RUNNER_IPV6'], '0'); self.assertEqual(connect.call_count, 2)
-
-    def test_detection_ipv6_both_real_config_paths(self):
-        from clash import generate_config
-        from location import generate_mihomo_config
-        special = with_hint(node(), 'https://resolver-a.example/dns-query')
-        for flag in ('0','1'):
-            with patch.dict(os.environ, {'AGGREGATOR_CAPTURE_NODE_DNS':'1', 'AGGREGATOR_RUNNER_IPV6':flag}):
-                with tempfile.TemporaryDirectory() as d:
-                    generate_config(d,[dict(special)],'test.yaml')
-                    live = yaml.safe_load((Path(d)/'test.yaml').read_text('utf-8'))
-                geo, _ = generate_mihomo_config([dict(special)], [18081], 18080)
-                for cfg in (live,geo):
-                    self.assertEqual(cfg['ipv6'], flag=='1')
-                    self.assertEqual(cfg['dns']['ipv6'], flag=='1')
-                    self.assertTrue(cfg['tcp-concurrent'])
-                    self.assertEqual(cfg['dns']['proxy-server-nameserver-policy'], {'edge.airport.example':['https://resolver-a.example/dns-query']})
-                    self.assertEqual(cfg['dns']['proxy-server-nameserver'], list(nd.NODE_DNS_RESOLVERS))
 
 
 if __name__=='__main__': unittest.main()

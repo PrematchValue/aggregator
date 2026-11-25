@@ -243,8 +243,6 @@ def aggregate(args: argparse.Namespace) -> None:
 
     if getattr(args, "geo_rename", False):
         os.environ["AGGREGATOR_CAPTURE_NODE_DNS"] = "1"
-        from extensions.node_dns import configure_runner_ipv6
-        configure_runner_ipv6(logger.info)
     results = pipeline.execute_tasks(tasks) if tasks else []
     proxies = list(itertools.chain.from_iterable([x[1] for x in results if x]))
     fresh_count = len(proxies)

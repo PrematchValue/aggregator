@@ -42,9 +42,12 @@ class ClashOneClickTests(unittest.TestCase):
         self.assertIn("geosite:cn,private", dns["nameserver-policy"])
         self.assertEqual(dns["proxy-server-nameserver"], [
             "https://dns.alidns.com/dns-query", "https://doh.pub/dns-query",
-            "https://doh-pure.onedns.net/dns-query", "https://doh.360.cn/dns-query",
         ])
         self.assertEqual(dns["default-nameserver"], ["223.5.5.5", "119.29.29.29"])
+        self.assertEqual(dns["nameserver-policy"]["geosite:cn,private"], [
+            "https://dns.alidns.com/dns-query", "https://doh.pub/dns-query",
+        ])
+        self.assertIn("encrypted-dns-server = https://dns.alidns.com/dns-query, https://doh.pub/dns-query\n", surge)
         self.assertEqual(dns["direct-nameserver"], [
             "https://dns.alidns.com/dns-query", "https://doh.pub/dns-query",
         ])
