@@ -37,6 +37,9 @@ class ClashOneClickTests(unittest.TestCase):
         surge = contents.split('{% if request.target == "surge" %}', 1)[1].split('{% if request.target == "loon" %}', 1)[0]
         self.assertIn("ipv6 = true\n", surge)
         self.assertIn("ipv6-vif = auto\n", surge)
+        self.assertNotIn("bypass-system", surge)
+        self.assertNotIn("bypass-tun", surge)
+        self.assertIn("tun-excluded-routes = 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12\n", surge)
         self.assertEqual(dns["enhanced-mode"], "fake-ip")
         self.assertEqual(dns["listen"], "127.0.0.1:1053")
         self.assertIn("geosite:cn,private", dns["nameserver-policy"])
@@ -63,7 +66,7 @@ class ClashOneClickTests(unittest.TestCase):
         module_path.insert(0, str(ROOT / 'subscribe'))
         from profile_layout import groups_for_clash
         groups = {g['name']: g for g in groups_for_clash(['🇭🇰 香港 001', '🇯🇵 日本 001'])}
-        self.assertEqual(groups['节点选择']['proxies'], ['香港节点', '日本节点'])
+        self.assertEqual(groups['节点选择']['proxies'], ['故障转移', '香港节点', '日本节点'])
         self.assertIn('人工智能', groups)
         self.assertNotIn('AI服务', groups)
         self.assertNotIn('DIRECT', groups['节点选择']['proxies'])

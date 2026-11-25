@@ -14,6 +14,7 @@ ICON_BASE = "https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color
 LOCAL_ICON_BASE = "https://raw.githubusercontent.com/PrematchValue/aggregator/main/subscribe/extensions/icons/"
 ICONS = {
     "节点选择": "Proxy.png",
+    "故障转移": "Auto.png",
     "苹果服务": "Apple.png",
     "苹果推送": LOCAL_ICON_BASE + "ApplePush.png",
     "谷歌服务": "Google_Search.png",
@@ -53,6 +54,8 @@ REGIONS = (
     ("美国节点", "🇺🇸 美国 "),
 )
 SPECIAL = "特殊节点"
+FALLBACK = "故障转移"
+TEST_URL = "https://www.gstatic.com/generate_204"
 
 
 def region_of(name: str) -> str:
@@ -79,14 +82,18 @@ def build_members(names: list[str]) -> tuple[list[str], dict[str, list[str]]]:
     return enabled, by_region
 
 
-def service_choices(name: str, enabled: list[str], direct: str) -> list[str]:
-    """Move only the requested first choice; retain all other relative order."""
+def service_choices(name: str, enabled: list[str], direct: str, *, with_fallback: bool = False) -> list[str]:
+    """Keep the original sing-box choices; opt in to shared fallback on Clash/Surge."""
     if name == "漏网之鱼":
         return ["节点选择", direct]
-    choices = [*enabled, direct]
-    first = {"苹果服务": direct, "港台番剧": direct,
-             "人工智能": "日本节点", "TikTok": "日本节点",
-             "GitHub": "香港节点", "微软服务": "美国节点"}.get(name)
+    choices = [*([FALLBACK] if with_fallback else []), *enabled, direct]
+    defaults = {"苹果服务": direct, "港台番剧": direct,
+                "人工智能": "日本节点", "TikTok": "日本节点",
+                "GitHub": "香港节点", "微软服务": "美国节点"}
+    if with_fallback:
+        defaults.update({"数字资产": "台湾节点", "谷歌服务": "日本节点",
+                         "国际媒体": "香港节点"})
+    first = defaults.get(name, FALLBACK if with_fallback else None)
     if first in choices:
         choices.remove(first)
         choices.insert(0, first)
@@ -95,19 +102,22 @@ def service_choices(name: str, enabled: list[str], direct: str) -> list[str]:
 
 def groups_for_clash(names: list[str]) -> list[dict]:
     enabled, by_region = build_members(names)
-    groups = [{"name": "节点选择", "type": "select", "proxies": enabled,
+    groups = [{"name": "节点选择", "type": "select", "proxies": [FALLBACK, *enabled],
                "icon": icon_url("节点选择")}]
     for name in SERVICES:
         groups.append({"name": name, "type": "select",
-                       "proxies": service_choices(name, enabled, "国内直连"),
+                       "proxies": service_choices(name, enabled, "国内直连", with_fallback=True),
                        "icon": icon_url(name)})
     for name in enabled:
         group = {"name": name, "type": "select", "proxies": by_region[name],
                  "icon": icon_url(name)}
         if name != SPECIAL:
-            group.update(type="url-test", url="https://www.gstatic.com/generate_204",
+            group.update(type="url-test", url=TEST_URL,
                          interval=600, tolerance=50, lazy=True)
         groups.append(group)
+    groups.append({"name": FALLBACK, "type": "fallback", "proxies": list(enabled),
+                   "url": TEST_URL, "interval": 600, "lazy": True,
+                   "hidden": True, "icon": icon_url(FALLBACK)})
     return groups
 
 
@@ -213,9 +223,9 @@ def _surge_layout(text: str) -> str:
     enabled, _ = build_members(names)
     icon = lambda name: f"icon-url={icon_url(name)}"
     group_lines = ["[Proxy Group]",
-                   "节点选择 = select, " + ", ".join([*enabled, icon("节点选择")])]
+                   "节点选择 = select, " + ", ".join([FALLBACK, *enabled, icon("节点选择")])]
     group_lines.extend(
-        f"{name} = select, {', '.join(service_choices(name, enabled, '国内直连'))}, {icon(name)}"
+        f"{name} = select, {', '.join(service_choices(name, enabled, '国内直连', with_fallback=True))}, {icon(name)}"
         for name in SERVICES
     )
     for name in enabled:
@@ -227,6 +237,9 @@ def _surge_layout(text: str) -> str:
         kind = "select" if name == SPECIAL else "smart"
         group_lines.append(f"{name} = {kind}, include-all-proxies=true, "
                            f"policy-regex-filter={pattern}, {icon(name)}")
+    group_lines.append(f"{FALLBACK} = fallback, {', '.join(enabled)}, "
+                       f"url={TEST_URL}, interval=600, hidden=true, "
+                       f"no-alert=true, {icon(FALLBACK)}")
     replacement = "\n".join(group_lines) + "\n\n"
     existing = next(((a, b) for n, a, b in sections if n == "proxy group"), None)
     if existing:

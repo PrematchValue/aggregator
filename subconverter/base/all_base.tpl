@@ -67,9 +67,8 @@ Rule: ~
 loglevel = notify
 ipv6 = true
 ipv6-vif = auto
-bypass-system = true
 skip-proxy = localhost, *.local, *.lan, 127.0.0.1, 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12
-bypass-tun = 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12
+tun-excluded-routes = 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12
 # Domestic encrypted DNS; no injected scripts, MITM or embedded certificates.
 dns-server = 223.5.5.5, 119.29.29.29
 encrypted-dns-server = https://dns.alidns.com/dns-query, https://doh.pub/dns-query
