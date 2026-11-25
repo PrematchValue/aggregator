@@ -382,7 +382,7 @@ class SourceDNSWiringAndIconTests(unittest.TestCase):
         self.assertEqual(icon_url('国际媒体'), 'https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Netflix.png')
         self.assertIn('电报代理',groups); self.assertIn('GitHub',groups)
         self.assertNotIn('Telegram',groups); self.assertNotIn('GitHub服务',groups)
-        self.assertEqual(groups['GitHub']['proxies'][0],'香港节点')
+        self.assertEqual(groups['GitHub']['proxies'][0],'故障转移')
         import tomllib
         reg=tomllib.loads((ROOT/'subconverter/snippets/rulesets.toml').read_text('utf-8'))
         self.assertIn('group = "电报代理"',(ROOT/'subconverter/snippets/rulesets.toml').read_text('utf-8'))

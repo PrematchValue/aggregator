@@ -34,6 +34,7 @@ ICONS = {
     "狮城节点": "Singapore.png",
     "美国节点": "United_States.png",
     "特殊节点": "Rocket.png",
+    "特殊自动": "Rocket.png",
 }
 
 def icon_url(name: str) -> str:
@@ -54,6 +55,7 @@ REGIONS = (
     ("美国节点", "🇺🇸 美国 "),
 )
 SPECIAL = "特殊节点"
+SPECIAL_AUTO = "特殊自动"
 FALLBACK = "故障转移"
 TEST_URL = "https://www.gstatic.com/generate_204"
 
@@ -92,12 +94,17 @@ def service_choices(name: str, enabled: list[str], direct: str, *, with_fallback
                 "GitHub": "香港节点", "微软服务": "美国节点"}
     if with_fallback:
         defaults.update({"数字资产": "台湾节点", "谷歌服务": "日本节点",
-                         "国际媒体": "香港节点"})
+                         "GitHub": FALLBACK, "国际媒体": FALLBACK})
     first = defaults.get(name, FALLBACK if with_fallback else None)
     if first in choices:
         choices.remove(first)
         choices.insert(0, first)
     return choices
+
+
+def fallback_members(enabled: list[str]) -> list[str]:
+    """Fallback must only reference automatically selected regional policies."""
+    return [SPECIAL_AUTO if name == SPECIAL else name for name in enabled]
 
 
 def groups_for_clash(names: list[str]) -> list[dict]:
@@ -115,7 +122,12 @@ def groups_for_clash(names: list[str]) -> list[dict]:
             group.update(type="url-test", url=TEST_URL,
                          interval=600, tolerance=50, lazy=True)
         groups.append(group)
-    groups.append({"name": FALLBACK, "type": "fallback", "proxies": list(enabled),
+    if SPECIAL in enabled:
+        groups.append({"name": SPECIAL_AUTO, "type": "url-test",
+                       "proxies": by_region[SPECIAL], "url": TEST_URL,
+                       "interval": 600, "tolerance": 50, "lazy": True,
+                       "hidden": True, "icon": icon_url(SPECIAL_AUTO)})
+    groups.append({"name": FALLBACK, "type": "fallback", "proxies": fallback_members(enabled),
                    "url": TEST_URL, "interval": 600, "lazy": True,
                    "hidden": True, "icon": icon_url(FALLBACK)})
     return groups
@@ -237,9 +249,12 @@ def _surge_layout(text: str) -> str:
         kind = "select" if name == SPECIAL else "smart"
         group_lines.append(f"{name} = {kind}, include-all-proxies=true, "
                            f"policy-regex-filter={pattern}, {icon(name)}")
-    group_lines.append(f"{FALLBACK} = fallback, {', '.join(enabled)}, "
-                       f"url={TEST_URL}, interval=600, hidden=true, "
-                       f"no-alert=true, {icon(FALLBACK)}")
+        if name == SPECIAL:
+            group_lines.append(f"{SPECIAL_AUTO} = smart, include-all-proxies=true, "
+                               f"policy-regex-filter={pattern}, hidden=1, {icon(SPECIAL_AUTO)}")
+    group_lines.append(f"{FALLBACK} = fallback, {', '.join(fallback_members(enabled))}, "
+                       f"url={TEST_URL}, interval=600, hidden=1, "
+                       f"no-alert=1, {icon(FALLBACK)}")
     replacement = "\n".join(group_lines) + "\n\n"
     existing = next(((a, b) for n, a, b in sections if n == "proxy group"), None)
     if existing:

@@ -78,7 +78,7 @@ class RuleUpdaterTests(unittest.TestCase):
         self.assertEqual(groups['人工智能'][0],'日本节点')
         self.assertEqual(groups['TikTok'][0],'日本节点')
         self.assertEqual(groups['微软服务'][0],'美国节点')
-        self.assertEqual(groups['GitHub'][0],'香港节点')
+        self.assertEqual(groups['GitHub'][0],'故障转移')
         self.assertIn('谷歌服务',groups)
         self.assertNotIn('Google服务',groups)
         self.assertEqual(groups['漏网之鱼'], ['节点选择','国内直连'])

@@ -38,7 +38,7 @@ class RuleCoverageTests(unittest.TestCase):
         options={g['name']:g['proxies'] for g in groups}
         self.assertEqual(options['人工智能'][0],'日本节点')
         self.assertEqual(options['微软服务'][0],'美国节点')
-        self.assertEqual(options['GitHub'][0],'香港节点')
+        self.assertEqual(options['GitHub'][0],'故障转移')
         self.assertLess(names.index('谷歌服务'),names.index('GitHub'))
         self.assertLess(names.index('TikTok'),names.index('国际媒体'))
         self.assertNotIn('Google服务',names)
