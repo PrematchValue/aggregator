@@ -4,6 +4,8 @@ port: {{ default(global.clash.http_port, "7890") }}
 socks-port: {{ default(global.clash.socks_port, "7891") }}
 allow-lan: {{ default(global.clash.allow_lan, "false") }}
 mode: Rule
+ipv6: true
+tcp-concurrent: true
 log-level: {{ default(global.clash.log_level, "info") }}
 external-controller: {{ default(global.clash.external_controller, "127.0.0.1:9090") }}
 # Ready-to-use Mihomo DNS. The selected proxy group handles overseas DoH.
@@ -11,7 +13,7 @@ external-controller: {{ default(global.clash.external_controller, "127.0.0.1:909
 dns:
   enable: true
   listen: 127.0.0.1:1053
-  ipv6: false
+  ipv6: true
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
   fake-ip-filter-mode: blacklist
@@ -65,7 +67,8 @@ Rule: ~
 
 [General]
 loglevel = notify
-ipv6 = false
+ipv6 = true
+ipv6-vif = auto
 bypass-system = true
 skip-proxy = localhost, *.local, *.lan, 127.0.0.1, 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12
 bypass-tun = 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12

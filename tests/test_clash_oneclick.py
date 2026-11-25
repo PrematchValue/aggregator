@@ -31,7 +31,12 @@ class ClashOneClickTests(unittest.TestCase):
         profile = simplified_clash_template()
         dns = profile["dns"]
         self.assertTrue(dns["enable"])
-        self.assertFalse(dns["ipv6"])
+        self.assertTrue(dns["ipv6"])
+        self.assertTrue(profile["ipv6"])
+        self.assertTrue(profile["tcp-concurrent"])
+        surge = contents.split('{% if request.target == "surge" %}', 1)[1].split('{% if request.target == "loon" %}', 1)[0]
+        self.assertIn("ipv6 = true\n", surge)
+        self.assertIn("ipv6-vif = auto\n", surge)
         self.assertEqual(dns["enhanced-mode"], "fake-ip")
         self.assertEqual(dns["listen"], "127.0.0.1:1053")
         self.assertIn("geosite:cn,private", dns["nameserver-policy"])

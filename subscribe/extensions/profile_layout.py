@@ -19,7 +19,7 @@ ICONS = {
     "谷歌服务": "Google_Search.png",
     "GitHub": "GitHub.png",
     "微软服务": "Windows.png",
-    "国际媒体": "Streaming.png",
+    "国际媒体": "Netflix.png",
     "港台番剧": "bilibili_3.png",
     "人工智能": "ChatGPT.png",
     "TikTok": "TikTok.png",

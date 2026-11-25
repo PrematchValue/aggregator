@@ -9,6 +9,7 @@ from __future__ import annotations
 import ipaddress
 import os
 import re
+import socket
 from collections import defaultdict
 from urllib.parse import urlsplit, parse_qsl
 
@@ -92,6 +93,45 @@ def _values(value):
     return value if isinstance(value, list) else [value]
 
 
+# Known ordinary public DNS endpoints, not airport-specific DoH. A custom
+# path/query on a public provider may represent an explicitly supplied profile.
+PUBLIC_DOH_HOSTS = frozenset({
+    "dns.alidns.com", "dns.alicdn.com", "doh.pub", "sm2.doh.pub", "dot.pub",
+    "doh.360.cn", "dot.360.cn", "doh-pure.onedns.net", "doh.onedns.net",
+    "doh.pub.onedns.net",
+    "cloudflare-dns.com", "one.one.one.one", "1dot1dot1dot1.cloudflare-dns.com",
+    "security.cloudflare-dns.com", "family.cloudflare-dns.com",
+    "dns.google", "dns.google.com", "dns.quad9.net", "dns10.quad9.net",
+    "dns11.quad9.net", "dns.adguard-dns.com", "dns.adguard.com",
+    "family.adguard-dns.com", "unfiltered.adguard-dns.com", "dns.nextdns.io",
+    "doh.opendns.com", "doh.familyshield.opendns.com", "doh.cleanbrowsing.org",
+    "dns.baidubce.com", "doh.baidu.com", "dns.ipv6dns.com",
+    "223.5.5.5", "223.6.6.6", "119.29.29.29", "119.28.28.28",
+    "101.226.4.6", "180.76.76.76", "114.114.114.114", "114.114.115.115",
+    "1.1.1.1", "1.0.0.1", "1.1.1.2", "1.0.0.2", "1.1.1.3", "1.0.0.3",
+    "8.8.8.8", "8.8.4.4", "9.9.9.9", "149.112.112.112",
+    "208.67.222.222", "208.67.220.220", "101.101.101.101",
+    "2606:4700:4700::1111", "2606:4700:4700::1001",
+    "2001:4860:4860::8888", "2001:4860:4860::8844", "2620:fe::fe",
+    "2400:3200::1", "2400:3200:baba::1", "2402:4e00::",
+})
+
+
+def is_dedicated_doh(value):
+    """A validated source URL, not a bare IP, DoT, or a known public DoH default."""
+    try:
+        u = urlsplit(value)
+        if u.scheme != "https" or not u.hostname:
+            return False
+        host = u.hostname.lower().rstrip(".")
+        host = public_ip(host) or host
+        # Keep real per-profile paths and query tokens, including IP:port URLs.
+        ordinary = not u.query and u.path.rstrip("/") in ("", "/dns-query", "/resolve")
+        return not (host in PUBLIC_DOH_HOSTS and ordinary)
+    except (TypeError, ValueError):
+        return False
+
+
 def hint(kind, value):
     vals = _values(value)
     if kind not in {'ip', 'dns'} or not vals or len(vals) > MAX_VALUES:
@@ -101,6 +141,12 @@ def hint(kind, value):
     # silently turn a private resolver into a different public resolver.
     if not all(normal):
         return None
+    if kind == 'dns':
+        # Do not mix public DNS into an airport-specific policy. A legacy
+        # public-IP-only snapshot also fails this check when metadata is read.
+        normal = [v for v in normal if is_dedicated_doh(v)]
+        if not normal:
+            return None
     return {'kind': kind, 'values': sorted(set(normal))}
 
 
@@ -353,6 +399,21 @@ NODE_DNS_RESOLVERS = (
 )
 
 
+def configure_runner_ipv6(log):
+    """Detect usable outbound IPv6 once per Refresh; never force IPv6-only."""
+    available = False
+    for target in ("2606:4700:4700::1111", "2001:4860:4860::8888"):
+        try:
+            with socket.create_connection((target, 443), timeout=2):
+                available = True
+                break
+        except OSError:
+            continue
+    os.environ["AGGREGATOR_RUNNER_IPV6"] = "1" if available else "0"
+    log("采集端 IPv6：" + ("公网 TCP 探测成功，启用双栈" if available else "公网 TCP 探测未通过，保留 IPv4"))
+    return available
+
+
 def apply_detection_dns(config, nodes):
     """Refresh-only node DNS defaults; keep the existing ordinary DNS path."""
     if os.getenv("AGGREGATOR_CAPTURE_NODE_DNS") == "1":
@@ -360,7 +421,10 @@ def apply_detection_dns(config, nodes):
         if not isinstance(dns, dict):
             raise ValueError("invalid Mihomo DNS section")
         dns["enable"] = True
-        dns.setdefault("ipv6", False)
+        ipv6 = os.getenv("AGGREGATOR_RUNNER_IPV6") == "1"
+        config["ipv6"] = ipv6
+        config["tcp-concurrent"] = True
+        dns["ipv6"] = ipv6
         dns.setdefault("enhanced-mode", "redir-host")
         # Liveness previously used system DNS for ordinary lookups; location
         # already has its own nameserver list. Leave either behavior intact.
@@ -592,8 +656,10 @@ def log_stage(label, nodes, log):
     hints = [metadata(n) for n in nodes if isinstance(n, dict)]
     hosts = {h['host'] for h in hints if h}
     accepted = mappings(nodes)
+    doh_count = sum(h['kind'] == 'dns' for h in accepted.values())
+    fixed_count = len(accepted) - doh_count
     log(f'节点专用 DNS [{label}]：节点={len(nodes)}，带映射节点={sum(h is not None for h in hints)}，'
-        f'关联域名={len(hosts)}，可用映射={len(accepted)}，冲突或循环跳过={len(hosts)-len(accepted)}')
+        f'关联域名={len(hosts)}，可用映射={len(accepted)}，冲突或循环跳过={len(hosts)-len(accepted)}，专用DoH={doh_count}，固定Hosts={fixed_count}')
 
 
 def log_profile(label, profile, nodes, log):
